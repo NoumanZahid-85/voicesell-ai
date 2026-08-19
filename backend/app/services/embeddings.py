@@ -1,61 +1,81 @@
 """
-Embedding service — calls OpenAI's embeddings API (text-embedding-3-small,
-truncated to 768 dims) instead of loading a local sentence-transformers model.
+Embedding service — calls Google's Gemini embeddings API (text-embedding-004)
+instead of loading a local sentence-transformers model.
 
-WHY: the local model path required torch + transformers + sentence-transformers
-(~2-3GB of deps, 500MB+ RAM at inference) which OOM-kills on Render's free tier
-(512MB). Calling a hosted embeddings API needs no local model weights and no
-extra RAM beyond a small HTTP client, at the cost of a per-call API round trip
-and per-token API cost. Output dimension is pinned to 768 via the `dimensions`
-param so the vector size matches the existing Qdrant `products` collection
-(VECTOR_DIMENSION=768) — no re-indexing schema change needed.
+WHY hosted instead of local: the local model path required torch +
+transformers + sentence-transformers (~2-3GB of deps, 500MB+ RAM at
+inference) which OOM-kills on Render's free tier (512MB web service).
+Calling a hosted embeddings API needs no local model weights and no extra
+RAM beyond a small HTTP client, at the cost of a per-call API round trip.
+
+WHY Gemini and not OpenAI: text-embedding-004 outputs 768 dimensions
+natively — matches the existing Qdrant `products` collection
+(VECTOR_DIMENSION=768) with no truncation/config needed. GEMINI_API_KEY is
+already a configured secret for this project (see render.yaml).
+
+WHY not Groq: Groq's API is inference-only (chat, Whisper transcription,
+TTS) — it does not offer an embeddings endpoint as of this writing.
 
 If you move the backend to a paid plan with enough RAM, you can swap this
-back to the local sentence-transformers implementation for zero-marginal-cost
+back to a local sentence-transformers implementation for zero-marginal-cost
 embeddings; keep the `embed`/`embed_one` interface the same and callers
-(app/services/rag.py) won't need to change.
+(app/services/rag.py, scripts/embed_products.py) won't need to change.
 """
 
 from __future__ import annotations
 
 import logging
 
-from openai import AsyncOpenAI
+import httpx
 
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMENSIONS = 768  # must match qdrant_client.VECTOR_DIMENSION
+EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_DIMENSIONS = 768  # native output size of text-embedding-004 — must match qdrant_client.VECTOR_DIMENSION
+_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+_BATCH_ENDPOINT = f"{_API_BASE}/models/{EMBEDDING_MODEL}:batchEmbedContents"
 
 
 class EmbeddingService:
-    """Thin wrapper around the OpenAI embeddings endpoint."""
+    """Thin wrapper around the Gemini embeddings REST endpoint."""
 
     def __init__(self) -> None:
         settings = get_settings()
-        if not settings.openai_api_key:
+        if not settings.gemini_api_key:
             raise RuntimeError(
-                "OPENAI_API_KEY is required for embeddings (used for "
-                "OpenAI's text-embedding-3-small endpoint, independent of "
-                "which LLM provider you use for chat)."
+                "GEMINI_API_KEY is required for embeddings (used for the "
+                "Gemini text-embedding-004 endpoint, independent of which "
+                "LLM provider you use for chat)."
             )
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self._api_key = settings.gemini_api_key
+        self._client = httpx.AsyncClient(timeout=30.0)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts → list of 768-dim normalized vectors."""
+        """Embed a batch of texts → list of 768-dim vectors."""
         if not texts:
             return []
-        response = await self._client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=texts,
-            dimensions=EMBEDDING_DIMENSIONS,
+        payload = {
+            "requests": [
+                {
+                    "model": f"models/{EMBEDDING_MODEL}",
+                    "content": {"parts": [{"text": text}]},
+                }
+                for text in texts
+            ]
+        }
+        response = await self._client.post(
+            _BATCH_ENDPOINT,
+            params={"key": self._api_key},
+            json=payload,
         )
-        return [item.embedding for item in response.data]
+        response.raise_for_status()
+        data = response.json()
+        return [item["values"] for item in data["embeddings"]]
 
     async def embed_one(self, text: str) -> list[float]:
-        """Embed a single text → one 768-dim normalized vector."""
+        """Embed a single text → one 768-dim vector."""
         return (await self.embed([text]))[0]
 
 
@@ -75,4 +95,4 @@ def warm_embedder() -> None:
 
     Kept so app/bootstrap.py doesn't need an import-site change.
     """
-    logger.info("Embedding service uses OpenAI API — no local warm-up needed")
+    logger.info("Embedding service uses Gemini API — no local warm-up needed")

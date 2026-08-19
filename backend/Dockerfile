@@ -18,8 +18,8 @@ COPY requirements.txt ./
 
 # Install all dependencies via pip.
 # --no-cache-dir : keeps the image lean
-# --timeout 300  : generous timeout for large wheels (torch ~200MB, daily-python ~80MB)
-RUN pip install --no-cache-dir --timeout 300 --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+# --timeout 300  : generous timeout for large wheels (daily-python ~80MB)
+RUN pip install --no-cache-dir --timeout 300 -r requirements.txt
 
 # Copy application source (after deps so this layer doesn't invalidate the dep layer)
 COPY . .
@@ -47,17 +47,26 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/app \
+    NLTK_DATA=/app/.nltk_data
+
+RUN mkdir -p /app/.nltk_data && chown -R appuser /app/.nltk_data
 
 USER appuser
 
 EXPOSE 8000
 
-CMD ["gunicorn", "app.main:app", \
-    "--workers", "2", \
-    "--worker-class", "uvicorn.workers.UvicornWorker", \
-    "--bind", "0.0.0.0:8000", \
-    "--timeout", "120", \
-    "--graceful-timeout", "10", \
-    "--access-logfile", "-", \
-    "--error-logfile", "-"]
+# Shell form (not exec-array form) so ${WEB_CONCURRENCY} actually expands —
+# Render sets this based on the instance's available CPUs (1 on free tier).
+# The old hardcoded "--workers 2" doubled memory use (two full copies of the
+# app process — pipecat, langgraph, onnxruntime, qdrant client) on a plan
+# that only has room for one.
+CMD gunicorn app.main:app \
+    --workers ${WEB_CONCURRENCY:-1} \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    --timeout 120 \
+    --graceful-timeout 10 \
+    --access-logfile - \
+    --error-logfile -
