@@ -17,6 +17,9 @@ services:
     plan: free
     region: frankfurt
     maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: everywhere
   # ── Backend: FastAPI + Pipecat (Daily WebRTC) ─────────────────────
   - type: web
     name: voicesell-backend
