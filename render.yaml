@@ -21,7 +21,7 @@ services:
   - type: web
     name: voicesell-backend
     runtime: docker
-    repo: https://github.com/NoumanZahid-85/vocal-commerce-sales-agent
+    repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
     branch: main
@@ -75,11 +75,11 @@ services:
       - key: LOG_LEVEL
         value: info
 
-  # ── Frontend: Next.js broadcast-console UI ────────────────────────
+  # ── Frontend: Next.js broadcast-console UI ─────────────────────
   - type: web
     name: voicesell-frontend
     runtime: node
-    repo: https://github.com/NoumanZahid-85/vocal-commerce-sales-agent
+    repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
     branch: main
