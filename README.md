@@ -1,128 +1,135 @@
-# 🎙️ Calliope AI (VoiceSell) — Production-Grade Voice-Enabled Commerce Chatbot & RAG Recommendation System
+# 🎙️ Calliope AI (VoiceSell)
 
-<p align="center">
-  <b>Ultra-low latency voice AI commerce engine powered by Pipecat, LangGraph, Qdrant, Deepgram, Cartesia, and FastAPI.</b>
-</p>
+**Production-grade, voice-enabled commerce agent** — real-time WebRTC voice pipeline + RAG-grounded product recommendations, built on Pipecat, LangGraph, Qdrant, and FastAPI.
 
----
-
-## 🛑 The Problem
-
-Modern e-commerce platforms and online storefronts face critical bottlenecks in customer support and conversion:
-1. **High Support Overhead & Latency**: Traditional text chatbots are slow, impersonal, and unable to handle nuanced product inquiries in real-time.
-2. **Hallucinated Product Knowledge**: LLMs frequently hallucinate product specifications, pricing, and stock availability when not tightly bound to a verified vector index.
-3. **Complex Order Operations**: Allowing an AI agent to place, modify, or cancel orders carries high financial risk without robust confirmation gates and structured validation.
-4. **Disjointed Voice Interfaces**: Building a conversational voice experience typically suffers from multi-second latency, lack of barge-in support, and poor audio streaming performance.
+[![Backend CI](https://img.shields.io/badge/backend-FastAPI%20%2B%20Docker-009688)](./backend)
+[![Frontend](https://img.shields.io/badge/frontend-Next.js%2016-000000)](./frontend)
+[![Deploy](https://img.shields.io/badge/deploy-Render%20Blueprint-46E3B7)](./render.yaml)
 
 ---
 
-## 💡 How We Solve It
+## The Problem
 
-**Calliope AI** solves these challenges through an integrated, production-grade architecture:
-- **Sub-500ms Voice Pipeline**: Combines WebRTC audio streaming, Voice Activity Detection (VAD), Deepgram STT, and Cartesia streaming TTS with barge-in capabilities.
-- **RAG-Grounded Product Catalog**: Ingests and vectorises the Olist Brazilian E-Commerce dataset (74+ translated product categories, weights, dimensions, and synthetic pricing) into a high-performance **Qdrant** vector index with 768-dimension embeddings. Every answer is strictly cited and grounded.
-- **LangGraph Conversational Agent**: Manages multi-turn stateful sales conversations, product recommendations, and secure order processing behind an explicit confirmation gate.
-- **Single-Context Upsell Engine**: Automatically suggests exactly one highly relevant cross-sell or upsell item per confirmed transaction based on association mining and vector similarity.
+1. **High support overhead & latency** — text chatbots are slow and can't handle nuanced product inquiries in real time.
+2. **Hallucinated product knowledge** — LLMs invent specs, pricing, and stock availability when not grounded in a verified index.
+3. **Risky order operations** — letting an agent place/modify/cancel orders is dangerous without explicit confirmation gates.
+4. **Disjointed voice UX** — most voice-bot builds suffer multi-second latency and no barge-in support.
+
+## How It's Solved
+
+- **Sub-500ms voice pipeline** — WebRTC audio via Daily, VAD, Deepgram STT, Cartesia streaming TTS, barge-in support.
+- **RAG-grounded catalog** — the Olist Brazilian e-commerce dataset (74+ categories) is vectorized into Qdrant (768-dim embeddings); every answer is grounded and cited.
+- **LangGraph agent** — stateful multi-turn sales conversations with an explicit confirmation gate before any order mutation.
+- **Upsell engine** — one relevant cross-sell suggestion per confirmed order, based on association mining + vector similarity.
 
 ---
 
-## 🏗️ Architecture Diagrams
+## Architecture
 
-Architecture assets are maintained in the repository:
-- **Voice Pipeline Architecture**: [`Images/VoiceArchitecture.png`](./Images/VoiceArchitecture.png)
-- **Chat & RAG Architecture**: [`Images/ChatArchitecture.png`](./Images/ChatArchitecture.png)
+```mermaid
+flowchart TD
+    U["User — Browser / Mic"] -->|WebRTC audio| DAILY["Daily / Pipecat<br/>VAD + audio transport"]
+    DAILY --> STT["Deepgram STT"]
+    STT --> AGENT["LangGraph Agent<br/>(state machine)"]
+    AGENT <--> VDB[("Qdrant<br/>Vector DB")]
+    AGENT --> API["FastAPI Backend"]
+    API <--> PG[("PostgreSQL<br/>orders / catalog")]
+    API <--> REDIS[("Redis<br/>session cache")]
+    AGENT --> TTS["Cartesia TTS"]
+    TTS -->|streamed audio| U
 
-```
-[ User Voice / WebRTC ] 
-       │
-       ▼
-[ Daily / Pipecat VAD ] 
-       │
-       ▼
-[ Deepgram STT ] ──► [ LangGraph Agent ] ◄──► [ Qdrant Vector DB ]
-                           │                             ▲
-                           ▼                             │
-                     [ FastAPI Backend ] ───────── [ Supabase / Postgres ]
-                           │
-                           ▼
-[ Cartesia TTS ] ──► [ Streaming Audio Output ]
+    FE["Next.js Console<br/>(chat / catalog / orders / admin)"] -->|REST| API
+    U -.->|HTTP| FE
 ```
 
----
+Static diagram assets (from earlier design passes) are also kept in the repo:
 
-## 🛠️ Tech Stack & Key Components
-
-- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, Pydantic v2, UV package manager.
-- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS, Motion, Phosphor Icons.
-- **Databases**: PostgreSQL (Supabase schema with UUIDs, JSONB, RLS) & Qdrant Vector Database.
-- **AI & Voice Services**: LangGraph (agent state machine), LiteLLM (multi-provider failover), Deepgram (STT), Cartesia (TTS).
-- **Quality & CI**: Ruff (linter/formatter), Pyright (strict static typing), Pytest (comprehensive unit & integration tests), GitHub Actions CI.
+- [`Images/VoiceArchitecture.png`](./Images/VoiceArchitecture.png)
+- [`Images/ChatArchitecture.png`](./Images/ChatArchitecture.png)
 
 ---
 
-## 📁 Repository Structure
+## Tech Stack
+
+| Layer      | Technology                                                                             |
+| ---------- | -------------------------------------------------------------------------------------- |
+| Backend    | Python 3.11, FastAPI, SQLAlchemy, Pydantic v2,`uv`                                     |
+| Frontend   | Next.js 16 (App Router), React 19, Tailwind, Motion, Phosphor Icons                    |
+| Databases  | PostgreSQL (Supabase-compatible schema), Qdrant vector DB, Redis                       |
+| AI / Voice | LangGraph, LiteLLM (multi-provider failover), Deepgram STT, Cartesia TTS, Daily WebRTC |
+| Quality    | Ruff, Pyright (strict), Pytest, GitHub Actions CI                                      |
+
+---
+
+## Repository Structure
 
 ```
-├── backend/                   # FastAPI Backend Application
+├── backend/                   # FastAPI application
 │   ├── app/
-│   │   ├── api/               # API endpoints & routing
-│   │   ├── core/              # Configuration & logging
-│   │   ├── db/                # Models & database session lifecycle
-│   │   ├── schemas/           # Pydantic validation schemas
-│   │   ├── services/          # Qdrant, RAG, LLM, and agent services
-│   │   └── voice/             # Pipecat & Daily voice session pipeline
-│   ├── scripts/               # Data ingestion & evaluation scripts
-│   ├── tests/                 # Comprehensive test suite (pytest)
-│   ├── Dockerfile             # Multi-stage production container
-│   └── pyproject.toml         # UV dependency & project configuration
-├── frontend/                  # Next.js 15 UI Application
-│   ├── app/                   # App Router pages (Landing, Chat, Catalog, Orders, Admin)
-│   ├── lib/                   # API clients and formatters
-│   └── package.json           # Node dependencies
-├── Images/                    # Architecture diagrams (Voice & Chat)
-├── docs/                      # Architectural Decision Records (ADRs) & notes
-├── render.yaml                # Render Infrastructure Blueprint
-└── docker-compose.yml         # Local development orchestration
+│   │   ├── api/                # routes
+│   │   ├── core/                # config & logging
+│   │   ├── db/                  # models & session lifecycle
+│   │   ├── schemas/              # Pydantic schemas
+│   │   ├── services/             # Qdrant / RAG / LLM / agent services
+│   │   └── voice/                 # Pipecat + Daily voice pipeline
+│   ├── scripts/                 # data ingestion & eval scripts
+│   ├── tests/                   # pytest suite
+│   ├── Dockerfile               # multi-stage production image
+│   └── .env.example
+├── frontend/                  # Next.js 16 UI
+│   ├── app/                     # routes (landing, chat, catalog, orders, admin)
+│   ├── lib/                     # API client
+│   └── .env.example
+├── Images/                    # architecture diagrams
+├── docs/                      # deployment & design notes
+└── render.yaml                # Render Blueprint (backend + frontend + Postgres + Redis)
 ```
 
 ---
 
-## 🚀 Getting Started & Local Development
+## Local Development
 
-### 1. Prerequisites
-- Docker Desktop & Docker Compose
-- Python 3.11+ with `uv` installed
-- Node.js 18+ (for frontend)
+**Prerequisites:** Docker & Docker Compose, Python 3.11+ with `uv`, Node.js 18+.
 
-### 2. Stand Up Infrastructure
 ```bash
+# 1. Infra
 docker compose up -d postgres qdrant
-```
 
-### 3. Run Backend Ingestion & Server
-```bash
+# 2. Backend
 cd backend
-cp .env.example .env
+cp .env.example .env        # fill in your keys
 uv run python -m scripts.ingest_olist
 uv run uvicorn app.main:app --reload --port 8000
-```
 
-### 4. Run Frontend Development Server
-```bash
+# 3. Frontend (new terminal)
 cd frontend
+cp .env.example .env.local
 npm install
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) for the UI dashboard and voice chat interface.
 
----
+Open http://localhost:3000.
 
-## 🧪 Testing & Verification
+### Tests
 
 ```bash
-# Backend tests & type checking
 cd backend
 uv run pytest
 uv run pyright app/
 uv run ruff check app/ tests/
 ```
+
+---
+
+## ☁️ Deploying to Render
+
+This repo ships a [`render.yaml`](./render.yaml) Blueprint that provisions **four** linked resources in one shot: Postgres, Redis (Key Value), the backend (Docker web service), and the frontend (Node web service).
+
+1. Push this repo to GitHub (branch: `master`).
+2. In the Render dashboard: **New → Blueprint** → select this repo → Render reads `render.yaml` and shows the resource plan.
+3. Click **Apply**. Render creates all four services and auto-wires `DATABASE_URL` / `REDIS_URL` into the backend.
+4. Once created, open the backend service → **Environment** and fill in the secrets marked `sync: false` in `render.yaml`:
+   `QDRANT_URL`, `QDRANT_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL_NAME`, `GEMINI_API_KEY`, `DAILY_API_KEY`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`.
+5. Redeploy the backend after saving env vars.
+
+> **Free-plan warning:** the backend pulls `torch`, `sentence-transformers`, and `transformers` (multi-GB, memory-heavy). Render's free web service tier (512MB RAM) is very likely to OOM at boot or hit build timeouts. If it fails, move the backend to at least the **Starter** plan.

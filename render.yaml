@@ -24,7 +24,7 @@ services:
     repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
-    branch: main
+    branch: master
     rootDir: backend
     dockerContext: .
     dockerfilePath: ./Dockerfile
@@ -82,10 +82,13 @@ services:
     repo: https://github.com/NoumanZahid-85/voicesell-ai
     plan: free
     region: frankfurt
-    branch: main
+    branch: master
     rootDir: frontend
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
+      # NOTE: Render's fromService property only exposes bare host (no scheme),
+      # but this var is consumed as a full URL (see frontend/lib/api.ts) — must be a literal.
+      # Must match the backend service's actual onrender.com URL exactly.
       - key: NEXT_PUBLIC_BACKEND_URL
         value: https://voicesell-backend.onrender.com
