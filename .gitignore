@@ -1,0 +1,51 @@
+# VoiceSell AI
+
+# Python / uv
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Data files (large CSVs)
+backend/scripts/data/*.csv
+backend/scripts/data/*.zip
+
+# Agentic AI
+.agents/
+.opencode/
+PLAN.md
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Local dev leftovers
+backend/test.db
+backend/traceback.txt
+backend/test-voice.html
+
+# Node (frontend)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+docs/adr/*.md

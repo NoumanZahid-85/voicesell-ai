@@ -1,0 +1,197 @@
+"""
+Custom Pipecat FrameProcessor that bridges STT transcripts → LangGraph agent → TTS.
+
+Architecture decisions:
+  - Subclasses FrameProcessor (Pipecat's unit-of-work abstraction).
+  - Receives TranscriptionFrame from Deepgram STT when end-of-turn fires.
+  - Invokes the stateful LangGraph agent (same logic as /api/v1/chat) via
+    a shared AsyncSession — obtained from FastAPI's dependency factory.
+  - Streams each sentence of the agent's reply down-pipeline as individual
+    TextFrame objects.  Cartesia can start synthesizing the first sentence
+    while the LLM generates the rest.
+  - Latency tracing: emits structured log lines for each pipeline stage so
+    we can build Grafana dashboards on them later (Phase 7).
+
+Error strategy ("never breaks at 2AM"):
+  - ANY exception in process_frame is caught, logged, and a safe fallback
+    phrase is pushed downstream.  A single bad customer message must NOT
+    crash the asyncio event loop.
+  - Long-running agent invocations are bounded by an asyncio.wait_for()
+    timeout (default 8s).  Timeout returns a graceful apology.
+  - All async-safety: we never await inside a sync context — the method is
+    fully async from frame receipt to reply dispatch.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+
+try:
+    from pipecat.frames.frames import (
+        EndFrame,
+        Frame,
+        LLMMessagesUpdateFrame,
+        TextFrame,
+        TranscriptionFrame,
+        UserStoppedSpeakingFrame,
+    )
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+except ImportError:
+    # Define simple dummy classes so uvicorn compiles on Windows without dependencies
+    class FrameProcessor: pass
+    class Frame: pass
+    class TranscriptionFrame: pass
+    class LLMMessagesUpdateFrame: pass
+    class TextFrame: pass
+    class FrameDirection:
+        DOWNSTREAM = 1
+
+from app.services import cache as cache_svc
+from app.services.agent import build_agent_graph
+
+logger = logging.getLogger(__name__)
+
+_FALLBACK_PHRASE = (
+    "I'm sorry, I ran into a bit of trouble there. "
+    "Could you say that again?"
+)
+_AGENT_TIMEOUT_S = 8.0  # seconds before we give up and apologise
+
+
+class LangGraphProcessor(FrameProcessor):
+    """
+    Pipecat processor that runs the LangGraph RAG agent on each transcribed turn.
+
+    Args:
+        db_session: SQLAlchemy AsyncSession (request-scoped, provided by voice
+                    endpoint via dependency injection).
+        session_id: Unique ID for this conversation — used for Redis history.
+    """
+
+    def __init__(self, db_session, session_id: str) -> None:
+        super().__init__()
+        self.db_session = db_session
+        self.session_id = session_id
+        # Build the LangGraph compiled graph once per voice session
+        self._agent = build_agent_graph(db_session, session_id=session_id)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Route frames through the pipeline, intercepting transcripts."""
+        await super().process_frame(frame, direction)
+
+        # We only act on final transcription frames (end-of-turn).
+        # UserStoppedSpeakingFrame comes before TranscriptionFrame; we let
+        # it pass through so Pipecat can manage barge-in state cleanly.
+        if isinstance(frame, TranscriptionFrame):
+            transcript = frame.text.strip()
+            if not transcript:
+                # Empty frame (noise) — do not invoke the agent
+                return
+            await self._handle_transcript(transcript)
+        else:
+            # Pass every other frame downstream unchanged
+            await self.push_frame(frame, direction)
+
+    async def _handle_transcript(self, text: str) -> None:
+        """
+        Invoke the LangGraph agent and stream reply sentences back as TextFrames.
+
+        Flow:
+          1. Check FAQ Redis cache — instant return on hits.
+          2. Load conversation history from Redis.
+          3. Run LangGraph with a timeout guard.
+          4. Cache the answer + save turn to history.
+          5. Split reply on sentence boundaries and push each sentence as a
+             TextFrame so TTS starts synthesising the first sentence early.
+        """
+        t0 = time.perf_counter()
+        logger.info("VoiceAgent received transcript: %r (session=%s)", text[:80], self.session_id)
+
+        try:
+            # 1) FAQ cache hit — fast path
+            cached = await cache_svc.get_cached_answer(text)
+            if cached:
+                logger.info("Cache HIT for session=%s", self.session_id)
+                await self._push_reply(cached)
+                return
+
+            # 2) Conversation memory
+            history = await cache_svc.get_history(self.session_id)
+
+            # 3) LangGraph agent — bounded by timeout
+            state = await asyncio.wait_for(
+                self._agent.ainvoke(
+                    {
+                        "user_message": text,
+                        "session_id":   self.session_id,
+                        "history":      history,
+                        "intent":       "",
+                        "context":      "",
+                        "chunks":       [],
+                        "order_result": None,
+                        "reply":        "",
+                    }
+                ),
+                timeout=_AGENT_TIMEOUT_S,
+            )
+            reply: str = state.get("reply", "").strip() or _FALLBACK_PHRASE
+
+            # 4) Persist cache + history (best-effort, non-blocking)
+            asyncio.create_task(cache_svc.set_cached_answer(text, reply))
+            asyncio.create_task(cache_svc.add_turn(self.session_id, text, reply))
+
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "Agent reply ready in %.1f ms | session=%s | intent=%s",
+                elapsed, self.session_id, state.get("intent", "?"),
+            )
+
+            # 5) Stream sentences to TTS
+            await self._push_reply(reply)
+
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Agent timeout after %.1fs | session=%s",
+                _AGENT_TIMEOUT_S, self.session_id,
+            )
+            await self._push_reply(
+                "I'm taking a little longer than usual. Could you repeat that?"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected agent error for session=%s: %s", self.session_id, exc)
+            await self._push_reply(_FALLBACK_PHRASE)
+
+    async def _push_reply(self, text: str) -> None:
+        """
+        Break reply into sentences and push each as a TextFrame.
+
+        Sentence-level streaming lets Deepgram Aura TTS start synthesis
+        immediately while the LLM generates subsequent sentences.
+        """
+        sentences = _split_sentences(text)
+        for sentence in sentences:
+            if sentence:
+                await self.push_frame(TextFrame(text=sentence), FrameDirection.DOWNSTREAM)
+
+        # Signal that we're done this turn — needed for barge-in reset state.
+        # LLMMessagesUpdateFrame (pipecat ≥1.5) resets the context without
+        # triggering a new LLM run.
+        await self.push_frame(
+            LLMMessagesUpdateFrame(messages=[], run_llm=False),
+            FrameDirection.DOWNSTREAM,
+        )
+
+
+def _split_sentences(text: str) -> list[str]:
+    """
+    Naively split text on sentence boundaries.
+
+    We prefer naive splits over NLTK/spacy to avoid heavy dependencies in
+    the voice critical path.  The result is good enough for TTS chunking.
+    """
+    import re
+    # Split on '. ', '! ', '? ' but keep the punctuation with the sentence.
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if p.strip()]

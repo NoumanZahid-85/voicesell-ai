@@ -1,0 +1,91 @@
+# Render Blueprint for VoiceSell AI
+# Deploy: push to main and Render auto-creates the services from this file.
+
+databases:
+  - name: voicesell-postgres
+    plan: free
+    region: frankfurt
+    databaseName: voicesell
+    user: voicesell
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: everywhere
+
+services:
+  - type: keyvalue
+    name: voicesell-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: allkeys-lru
+  # ── Backend: FastAPI + Pipecat (Daily WebRTC) ─────────────────────
+  - type: web
+    name: voicesell-backend
+    runtime: docker
+    repo: https://github.com/NoumanZahid-85/vocal-commerce-sales-agent
+    plan: free
+    region: frankfurt
+    branch: main
+    rootDir: backend
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: voicesell-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: voicesell-redis
+          type: keyvalue
+          property: connectionString
+      # External services - set values in the dashboard at first deploy
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL_NAME
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DAILY_API_KEY
+        sync: false
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: OTEL_EXPORTER_ENDPOINT
+        sync: false
+      - key: APP_NAME
+        value: voicesell
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: info
+
+  # ── Frontend: Next.js broadcast-console UI ────────────────────────
+  - type: web
+    name: voicesell-frontend
+    runtime: node
+    repo: https://github.com/NoumanZahid-85/vocal-commerce-sales-agent
+    plan: free
+    region: frankfurt
+    branch: main
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_BACKEND_URL
+        value: https://voicesell-backend.onrender.com
