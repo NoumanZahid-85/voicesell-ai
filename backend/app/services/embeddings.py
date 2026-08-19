@@ -1,60 +1,62 @@
 """
-Embedding service wrapping sentence-transformers (BAAI/bge-base-en-v1.5).
+Embedding service — calls OpenAI's embeddings API (text-embedding-3-small,
+truncated to 768 dims) instead of loading a local sentence-transformers model.
 
-The model is loaded lazily on first use and kept as a process-wide singleton.
-`sentence_transformers` (and its heavy torch dependency) is imported lazily so
-that importing this module does not slow down tests or startup.
+WHY: the local model path required torch + transformers + sentence-transformers
+(~2-3GB of deps, 500MB+ RAM at inference) which OOM-kills on Render's free tier
+(512MB). Calling a hosted embeddings API needs no local model weights and no
+extra RAM beyond a small HTTP client, at the cost of a per-call API round trip
+and per-token API cost. Output dimension is pinned to 768 via the `dimensions`
+param so the vector size matches the existing Qdrant `products` collection
+(VECTOR_DIMENSION=768) — no re-indexing schema change needed.
 
-Why BAAI/bge-base-en-v1.5: 768-dim embeddings with strong retrieval quality on
-English text — matches the Qdrant `products` collection dimension.
+If you move the backend to a paid plan with enough RAM, you can swap this
+back to the local sentence-transformers implementation for zero-marginal-cost
+embeddings; keep the `embed`/`embed_one` interface the same and callers
+(app/services/rag.py) won't need to change.
 """
 
 from __future__ import annotations
 
 import logging
 
+from openai import AsyncOpenAI
+
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSIONS = 768  # must match qdrant_client.VECTOR_DIMENSION
+
 
 class EmbeddingService:
-    """Lazy singleton wrapper around a SentenceTransformer model."""
+    """Thin wrapper around the OpenAI embeddings endpoint."""
 
-    def __init__(self, model_name: str | None = None) -> None:
+    def __init__(self) -> None:
         settings = get_settings()
-        self.model_name = model_name or settings.embedding_model
-        self._model = None
-
-    @property
-    def model(self):
-        """The underlying SentenceTransformer, created on first access."""
-        if self._model is None:
-            # Lazy import — importing sentence_transformers pulls in torch (~45s).
-            from sentence_transformers import SentenceTransformer
-
-            logger.info(
-                "Loading embedding model %s (first load may take a while)...",
-                self.model_name,
+        if not settings.openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is required for embeddings (used for "
+                "OpenAI's text-embedding-3-small endpoint, independent of "
+                "which LLM provider you use for chat)."
             )
-            self._model = SentenceTransformer(self.model_name)
-            logger.info("Embedding model %s ready", self.model_name)
-        return self._model
+        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts → list of 768-dim normalized vectors."""
         if not texts:
             return []
-        vectors = self.model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
+        response = await self._client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=texts,
+            dimensions=EMBEDDING_DIMENSIONS,
         )
-        return vectors.tolist()
+        return [item.embedding for item in response.data]
 
-    def embed_one(self, text: str) -> list[float]:
+    async def embed_one(self, text: str) -> list[float]:
         """Embed a single text → one 768-dim normalized vector."""
-        return self.embed([text])[0]
+        return (await self.embed([text]))[0]
 
 
 _embedder: EmbeddingService | None = None
@@ -69,9 +71,8 @@ def get_embedder() -> EmbeddingService:
 
 
 def warm_embedder() -> None:
-    """Pre-load the embedding model at startup (avoids 30s first-request stall)."""
-    try:
-        _ = get_embedder().model
-        logger.info("Embedding model warm-up complete")
-    except Exception as exc:
-        logger.warning("Embedding model warm-up failed (will retry lazily): %s", exc)
+    """No-op now — nothing to pre-load for an API-backed embedder.
+
+    Kept so app/bootstrap.py doesn't need an import-site change.
+    """
+    logger.info("Embedding service uses OpenAI API — no local warm-up needed")

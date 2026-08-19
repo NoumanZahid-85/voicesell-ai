@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     otel_exporter_endpoint: str = ""
 
     # ── RAG (Phase 2) ─────────────────────────────────────────────
-    embedding_model: str = "BAAI/bge-base-en-v1.5"
+    # Embedding model is now hardcoded in app/services/embeddings.py
+    # (EMBEDDING_MODEL, EMBEDDING_DIMENSIONS) since it calls the OpenAI
+    # API rather than loading a configurable local model.
     rag_top_k: int = 5
     rag_cache_ttl_seconds: int = 86400  # 24h FAQ cache
     rag_memory_turns: int = 10  # conversation history kept per session

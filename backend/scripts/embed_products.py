@@ -156,7 +156,7 @@ async def embed_products() -> int:
     for batch_start in range(0, len(points), BATCH_SIZE):
         batch = points[batch_start : batch_start + BATCH_SIZE]
         texts = [p["payload"]["description"] for p in batch]
-        vectors = embedder.embed(texts)
+        vectors = await embedder.embed(texts)
         qdrant_points = [
             PointStruct(id=p["id"], vector=vec, payload=p["payload"]) for p, vec in zip(batch, vectors, strict=True)
         ]

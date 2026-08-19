@@ -137,7 +137,7 @@ class RAGService:
         top_k = top_k or self.settings.rag_top_k
 
         # 1) Dense retrieval
-        query_vector = self.embedder.embed_one(query)
+        query_vector = await self.embedder.embed_one(query)
         search_filter = self._build_filter(category, max_price)
 
         vector_hits = await self.qdrant.query_points(

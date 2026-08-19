@@ -18,8 +18,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "qdrant-client>=1.19.0",
     "redis>=5.0.0",
-    "sentence-transformers>=3.0.0",
-    "torch",
+    "openai>=1.40.0",
     "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn[standard]>=0.52.1",
     # Phase 5 — association rule mining (mine_associations.py script)
@@ -67,16 +66,3 @@ typeCheckingMode = "basic"
 reportMissingImports = false
 reportMissingModuleSource = false
 
-# ── uv: force CPU-only PyTorch ───────────────────────────────────────
-# sentence-transformers pulls torch, which by default resolves to the
-# full CUDA build (~1.3 GB of nvidia-* wheels). On a CPU-only server
-# (Render free tier, no GPU) we pin torch to the lightweight CPU wheel.
-# CPU torch (~200 MB) is sufficient for embedding inference workloads.
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
