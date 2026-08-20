@@ -1,5 +1,5 @@
 """
-Embedding service — calls Google's Gemini embeddings API (text-embedding-004)
+Embedding service — calls Google's Gemini embeddings API (gemini-embedding-001)
 instead of loading a local sentence-transformers model.
 
 WHY hosted instead of local: the local model path required torch +
@@ -8,7 +8,7 @@ inference) which OOM-kills on Render's free tier (512MB web service).
 Calling a hosted embeddings API needs no local model weights and no extra
 RAM beyond a small HTTP client, at the cost of a per-call API round trip.
 
-WHY Gemini and not OpenAI: text-embedding-004 outputs 768 dimensions
+WHY Gemini and not OpenAI: gemini-embedding-001 outputs 768 dimensions
 natively — matches the existing Qdrant `products` collection
 (VECTOR_DIMENSION=768) with no truncation/config needed. GEMINI_API_KEY is
 already a configured secret for this project (see render.yaml).
@@ -32,8 +32,8 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_MODEL = "text-embedding-004"
-EMBEDDING_DIMENSIONS = 768  # native output size of text-embedding-004 — must match qdrant_client.VECTOR_DIMENSION
+EMBEDDING_MODEL = "gemini-embedding-001"
+EMBEDDING_DIMENSIONS = 768  # truncated via output_dimensionality — must match qdrant_client.VECTOR_DIMENSION
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _BATCH_ENDPOINT = f"{_API_BASE}/models/{EMBEDDING_MODEL}:batchEmbedContents"
 
@@ -46,7 +46,7 @@ class EmbeddingService:
         if not settings.gemini_api_key:
             raise RuntimeError(
                 "GEMINI_API_KEY is required for embeddings (used for the "
-                "Gemini text-embedding-004 endpoint, independent of which "
+                "Gemini gemini-embedding-001 endpoint, independent of which "
                 "LLM provider you use for chat)."
             )
         self._api_key = settings.gemini_api_key
@@ -61,13 +61,14 @@ class EmbeddingService:
                 {
                     "model": f"models/{EMBEDDING_MODEL}",
                     "content": {"parts": [{"text": text}]},
+                    "output_dimensionality": EMBEDDING_DIMENSIONS,
                 }
                 for text in texts
             ]
         }
         response = await self._client.post(
             _BATCH_ENDPOINT,
-            params={"key": self._api_key},
+            headers={"x-goog-api-key": self._api_key},
             json=payload,
         )
         response.raise_for_status()
