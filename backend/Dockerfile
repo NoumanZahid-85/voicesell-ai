@@ -36,8 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglx-mesa0 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
-    && adduser --disabled-password --no-create-home --gecos "" appuser \
-    && chown -R appuser /app
+    && adduser --disabled-password --no-create-home --gecos "" appuser
 
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -51,7 +50,12 @@ ENV PYTHONUNBUFFERED=1 \
     HOME=/app \
     NLTK_DATA=/app/.nltk_data
 
-RUN mkdir -p /app/.nltk_data && chown -R appuser /app/.nltk_data
+# chown runs LAST, after every COPY — COPY always writes as root regardless
+# of what ran before it, so an earlier chown gets silently undone for any
+# path that exists in the build context (e.g. the git-tracked scripts/data/
+# directory, which caused a PermissionError on every auto-seed attempt: the
+# directory itself was root-owned with no write bit for appuser).
+RUN mkdir -p /app/.nltk_data && chown -R appuser /app
 
 USER appuser
 
