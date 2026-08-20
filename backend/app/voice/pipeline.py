@@ -121,7 +121,6 @@ async def build_and_run_pipeline(
             endpointing=300,
             interim_results=False,
             utterance_end_ms=1000,
-            extra={"filler_words": False},   # removes "um", "uh" noise
         ),
     )
 

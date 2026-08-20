@@ -394,7 +394,7 @@ export default function ChatPage() {
       {roomUrl && mode === "voice" && (
         <iframe
           src={roomUrl}
-          allow="microphone; camera; autoplay"
+          allow="microphone; autoplay"
           style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
           title="Daily Voice Room"
         />
