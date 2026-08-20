@@ -113,16 +113,16 @@ async def build_and_run_pipeline(
     # interim_results=False → no partial transcripts hitting the agent.
     stt = DeepgramSTTService(
         api_key=settings.deepgram_api_key,
-        live_options={
-            "model": "nova-3",
-            "language": "en-US",
-            "smart_format": True,
-            "punctuate": True,
-            "endpointing": 300,
-            "interim_results": False,
-            "utterance_end_ms": 1000,
-            "filler_words": False,   # removes "um", "uh" noise
-        },
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+            language="en-US",
+            smart_format=True,
+            punctuate=True,
+            endpointing=300,
+            interim_results=False,
+            utterance_end_ms=1000,
+            extra={"filler_words": False},   # removes "um", "uh" noise
+        ),
     )
 
     # ── LangGraph agent bridge ────────────────────────────────────────

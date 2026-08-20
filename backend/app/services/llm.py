@@ -33,7 +33,10 @@ def get_llm_router():
             {
                 "model_name": PRIMARY_MODEL,
                 "litellm_params": {
-                    "model": "groq/llama-3.3-70b-versatile",
+                    # llama-3.3-70b-versatile was decommissioned by Groq on
+                    # 2026-08-16 (announced 2026-06-17). openai/gpt-oss-120b
+                    # is Groq's recommended replacement.
+                    "model": "groq/openai/gpt-oss-120b",
                     "api_key": settings.groq_api_key,
                     "timeout": 5,
                 },
@@ -72,9 +75,23 @@ def get_llm_router():
 
     fallback_names = [m["model_name"] for m in model_list if m["model_name"] != PRIMARY_MODEL]
 
+    # LiteLLM's Router only consults the fallbacks entry keyed by the model
+    # group it is *currently* trying. If "agent" fails over to
+    # "fallback-openai" and that ALSO fails, the Router looks for an entry
+    # keyed "fallback-openai" — not the original "agent" entry — to decide
+    # whether to keep going. Without that entry it aborts with "No fallback
+    # model group found for original model_group=fallback-openai" instead of
+    # continuing on to "fallback-gemini". So we chain every step explicitly:
+    # {agent: [openai, gemini]}, {openai: [gemini]}, ...
+    fallbacks = []
+    if fallback_names:
+        fallbacks.append({PRIMARY_MODEL: fallback_names})
+        for i in range(len(fallback_names) - 1):
+            fallbacks.append({fallback_names[i]: fallback_names[i + 1 :]})
+
     router = Router(
         model_list=model_list,
-        fallbacks=[{PRIMARY_MODEL: fallback_names}] if fallback_names else [],
+        fallbacks=fallbacks,
         allowed_fails=3,
         cooldown_time=60,
         num_retries=1,
