@@ -200,7 +200,7 @@ export default function AdminPage() {
                     height: 36,
                     borderRadius: "var(--r-md)",
                     background: s.live ? "var(--signal-soft)" : "var(--ink-3)",
-                    border: `1px solid ${s.live ? "rgba(201,241,105,0.18)" : "var(--line)"}`,
+                    border: `1px solid ${s.live ? "rgba(69,80,229,0.18)" : "var(--line)"}`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",

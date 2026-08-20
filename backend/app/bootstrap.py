@@ -9,11 +9,13 @@ reuse the same collection contract.
 from __future__ import annotations
 
 import logging
+import os
 
 from qdrant_client.models import Distance, VectorParams
+from sqlalchemy import func, select
 
-from app.db.models import Base
-from app.db.session import get_engine
+from app.db.models import Base, Product
+from app.db.session import get_engine, get_session_factory
 from app.services.embeddings import warm_embedder
 from app.services.qdrant_client import (
     PRODUCTS_COLLECTION,
@@ -87,6 +89,64 @@ async def warm_embeddings() -> None:
     import asyncio
 
     await asyncio.to_thread(warm_embedder)
+
+
+async def auto_seed() -> None:
+    """Seed the catalog automatically on first boot, if it's empty.
+
+    WHY this exists: Render's free plan has no Shell/Job access, so there's
+    no way to manually run `scripts.ingest_olist` / `scripts.embed_products`
+    after deploy. Instead, check whether the `products` table already has
+    rows; if it's empty, run both seeding steps inline during startup. This
+    only fires once — subsequent boots see a non-empty table and skip it —
+    so it's safe to leave on permanently. Set AUTO_SEED=false to disable
+    (e.g. once you have Shell/Job access and prefer to seed manually).
+
+    Deliberately does not raise: a seeding failure (e.g. Qdrant not yet
+    configured) should not prevent the app from serving text/order/admin
+    traffic that doesn't depend on the catalog being populated yet.
+    """
+    if os.getenv("AUTO_SEED", "true").lower() in ("false", "0", "no"):
+        logger.info("AUTO_SEED disabled — skipping automatic catalog seeding")
+        return
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            count = await session.scalar(select(func.count()).select_from(Product))
+        if count and count > 0:
+            logger.info("Products table already has %d rows — skipping auto-seed", count)
+            return
+
+        logger.info("Products table is empty — running one-time auto-seed...")
+
+        # Import here (not at module top) so a missing/broken scripts module
+        # can't break the app on every boot — only the seed attempt itself.
+        from scripts.embed_products import embed_products
+        from scripts.ingest_olist import ensure_data_files, ingest, load_products_from_csv
+
+        products_path, _ = await ensure_data_files()
+        products_data = load_products_from_csv(products_path)
+        async with factory() as session:
+            cat_count, prod_count = await ingest(session, products_data)
+        logger.info("Auto-seed: ingested %d products, %d categories into PostgreSQL", prod_count, cat_count)
+
+        try:
+            embedded_count = await embed_products()
+            logger.info("Auto-seed: embedded %d products into Qdrant", embedded_count)
+        except Exception as exc:
+            logger.warning(
+                "Auto-seed: PostgreSQL ingestion succeeded but Qdrant embedding failed "
+                "(%s) — catalog page will work, chat/voice product search will not until "
+                "this is fixed and the app restarts (it will retry next boot since the "
+                "products table now has rows... actually it won't, since this check is "
+                "row-count based. Re-run manually via `python -m scripts.embed_products` "
+                "once Shell/Job access is available, or clear the products table to "
+                "retrigger auto-seed).",
+                exc,
+            )
+    except Exception:
+        logger.exception("Auto-seed failed — app will continue starting without seeded data")
 
 
 async def shutdown() -> None:

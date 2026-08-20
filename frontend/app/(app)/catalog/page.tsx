@@ -132,7 +132,7 @@ export default function CatalogPage() {
             width: 236,
             flexShrink: 0,
             borderRight: "1px solid var(--line)",
-            background: "rgba(15, 18, 24, 0.4)",
+            background: "var(--ink-1)",
           }}
           data-catalog-rail
         >
@@ -164,7 +164,7 @@ export default function CatalogPage() {
         {/* Content column */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           {/* Mobile rail (horizontal scroll) */}
-          <div style={{ display: "none", borderBottom: "1px solid var(--line)", background: "rgba(10,12,16,0.4)" }} data-catalog-rail-mobile>
+          <div style={{ display: "none", borderBottom: "1px solid var(--line)", background: "var(--ink-1)" }} data-catalog-rail-mobile>
             <div className="cat-rail" style={{ flexDirection: "row", overflowX: "auto", padding: "8px 12px" }}>
               <button
                 className="cat-key"
@@ -201,7 +201,7 @@ export default function CatalogPage() {
               gap: 12,
               flexWrap: "wrap",
               flexShrink: 0,
-              background: "rgba(10, 12, 16, 0.4)",
+              background: "var(--ink-1)",
             }}
           >
             <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 300 }}>

@@ -21,7 +21,7 @@ from app.api.health import router as health_router
 from app.api.orders import router as orders_router
 from app.api.products import router as products_router
 from app.api.voice import router as voice_router
-from app.bootstrap import ensure_schema, ensure_vector_store, shutdown, warm_embeddings
+from app.bootstrap import auto_seed, ensure_schema, ensure_vector_store, shutdown, warm_embeddings
 from app.core.config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s")
@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     - Creates all DB tables (dev convenience — Alembic handles prod migrations)
     - Ensures the Qdrant products collection exists
     - Pre-warms the embedding model off the event loop
+    - Auto-seeds the catalog once, if empty (see bootstrap.auto_seed docstring —
+      this exists because the free Render plan has no Shell/Job access)
     """
     settings = get_settings()
     logger.info("Starting %s (debug=%s)", settings.app_name, settings.debug)
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
     await ensure_schema()
     await ensure_vector_store()
     await warm_embeddings()
+    await auto_seed()
 
     yield  # ← app runs here
 

@@ -63,7 +63,7 @@ function OrderRow({ order }: { order: Order }) {
                 <div
                   style={{
                     padding: "14px 18px",
-                    background: "rgba(255, 77, 122, 0.04)",
+                    background: "rgba(69, 80, 229, 0.04)",
                     borderBottom: "1px solid var(--line)",
                   }}
                 >
@@ -170,7 +170,7 @@ export default function OrdersPage() {
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
           borderBottom: "1px solid var(--line)",
-          background: "rgba(15, 18, 24, 0.5)",
+          background: "var(--ink-1)",
         }}
       >
         {(["pending", "confirmed", "shipped", "delivered", "cancelled"] as OrderStatus[]).map((s) => (
@@ -206,7 +206,7 @@ export default function OrdersPage() {
           gap: 12,
           flexWrap: "wrap",
           flexShrink: 0,
-          background: "rgba(10, 12, 16, 0.4)",
+          background: "var(--ink-1)",
         }}
       >
         <div style={{ position: "relative", flex: "1 1 200px", maxWidth: 300 }}>

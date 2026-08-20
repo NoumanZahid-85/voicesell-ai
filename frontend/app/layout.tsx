@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Outfit, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { MotionProvider } from "./components/motion-provider";
 import "./globals.css";
 
-const outfit = Outfit({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-outfit",
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -33,7 +33,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className={`${outfit.variable} ${jetbrains.variable}`}
+        className={`${inter.variable} ${jetbrains.variable}`}
       >
         <div className="stage" aria-hidden="true" />
         <MotionProvider>{children}</MotionProvider>

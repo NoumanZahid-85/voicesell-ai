@@ -297,7 +297,7 @@ export default function ChatPage() {
               style={{
                 padding: "13px 20px",
                 borderTop: "1px solid var(--line)",
-                background: "rgba(10, 12, 16, 0.72)",
+                background: "var(--chrome-deep)",
                 backdropFilter: "blur(12px)",
                 display: "flex",
                 alignItems: "center",
@@ -409,7 +409,7 @@ export default function ChatPage() {
             display: "flex",
             gap: 10,
             alignItems: "center",
-            background: "rgba(10, 12, 16, 0.72)",
+            background: "var(--chrome-deep)",
             backdropFilter: "blur(12px)",
             maxWidth: 900,
             width: "100%",

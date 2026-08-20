@@ -136,15 +136,14 @@ This repo ships a [`render.yaml`](./render.yaml) Blueprint that provisions **fou
 
 ### Seeding data (why the catalog/orders pages are empty after first deploy)
 
-A fresh deploy has an empty Postgres and an empty Qdrant collection — the UI has nothing to show until you seed it. Two steps, run **once** after the backend is live and its `sync: false` env vars (Qdrant, Gemini, etc.) are filled in:
+The backend now **seeds itself automatically** on first boot — this project targets Render's free tier, which has no Shell/Job access, so a manual seeding step isn't reliable for every deployer.
 
-1. **Open a shell on the backend service** — Render dashboard → `voicesell-backend` → **Shell** tab (top right). This gives you a terminal inside the running container.
-2. Run, in order:
-   ```bash
-   python -m scripts.ingest_olist      # loads the Olist product catalog into Postgres
-   python -m scripts.embed_products    # embeds each product via Gemini and upserts into Qdrant
-   ```
-   `ingest_olist` populates the `products` table (what `/catalog` reads). `embed_products` is what makes RAG-grounded chat answers and `/chat` semantic search work — skip it and the catalog page will show data, but the AI won't be able to find/recommend products by meaning.
-3. Refresh `/catalog` — products should now appear. Orders start empty and populate as real orders are placed through the chat/voice flow; there's no separate order-seeding step.
+On startup, the app checks whether the `products` table is empty. If it is, it runs the equivalent of `scripts.ingest_olist` (loads/generates the Olist catalog into Postgres) and `scripts.embed_products` (embeds each product via Gemini and upserts into Qdrant) inline, once, before serving traffic. Subsequent restarts see a non-empty table and skip it — safe to leave on permanently.
 
-If the Shell tab isn't available on your plan, the same two commands can be run as a Render **one-off Job** (dashboard → New → Job → same repo/service → command as above) instead.
+- **To disable** (e.g. once you have Shell/Job access and prefer to seed manually): set `AUTO_SEED=false` in the backend's environment.
+- **If Qdrant isn't configured yet** when auto-seed runs: Postgres still gets seeded (so `/catalog` works), but the Qdrant embedding step is skipped with a warning in the logs — chat/voice product search won't work until you fix `QDRANT_URL`/`QDRANT_API_KEY` and either get Shell/Job access to run `python -m scripts.embed_products` manually, or clear the `products` table to re-trigger auto-seed on the next boot.
+- **If you do have Shell/Job access** (Starter plan or above), you can still run the two scripts manually instead — same result, on your own schedule:
+  ```bash
+  python -m scripts.ingest_olist
+  python -m scripts.embed_products
+  ```

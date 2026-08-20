@@ -92,7 +92,7 @@ export default function LandingPage() {
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 clamp(18px, 5vw, 52px)",
-          background: "rgba(10, 12, 16, 0.78)",
+          background: "var(--chrome)",
           backdropFilter: "blur(16px)",
           borderBottom: "1px solid var(--line)",
         }}
@@ -248,7 +248,7 @@ export default function LandingPage() {
               gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
               border: "1px solid var(--line)",
               borderRadius: "var(--r-lg)",
-              background: "rgba(15, 18, 24, 0.6)",
+              background: "var(--ink-1)",
               overflow: "hidden",
             }}
           >
@@ -310,7 +310,7 @@ export default function LandingPage() {
                     height: 40,
                     borderRadius: "var(--r-md)",
                     background: "var(--signal-soft)",
-                    border: "1px solid rgba(255, 77, 122, 0.18)",
+                    border: "1px solid rgba(69, 80, 229, 0.18)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -388,8 +388,8 @@ export default function LandingPage() {
               margin: "0 auto",
               padding: "46px 40px",
               textAlign: "center",
-              borderColor: "rgba(255, 77, 122, 0.14)",
-              background: "linear-gradient(180deg, rgba(201,241,105,0.05), rgba(15,18,24,0.72) 45%), rgba(15,18,24,0.72)",
+              borderColor: "rgba(69, 80, 229, 0.14)",
+              background: "linear-gradient(180deg, rgba(69,80,229,0.05), var(--ink-2) 45%), var(--ink-2)",
             }}
           >
             <h2 className="display-md" style={{ marginBottom: 12 }}>
