@@ -63,7 +63,7 @@ function OrderRow({ order }: { order: Order }) {
                 <div
                   style={{
                     padding: "14px 18px",
-                    background: "rgba(201, 241, 105, 0.04)",
+                    background: "rgba(255, 77, 122, 0.04)",
                     borderBottom: "1px solid var(--line)",
                   }}
                 >

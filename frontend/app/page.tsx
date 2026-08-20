@@ -310,7 +310,7 @@ export default function LandingPage() {
                     height: 40,
                     borderRadius: "var(--r-md)",
                     background: "var(--signal-soft)",
-                    border: "1px solid rgba(201, 241, 105, 0.18)",
+                    border: "1px solid rgba(255, 77, 122, 0.18)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -388,7 +388,7 @@ export default function LandingPage() {
               margin: "0 auto",
               padding: "46px 40px",
               textAlign: "center",
-              borderColor: "rgba(201, 241, 105, 0.14)",
+              borderColor: "rgba(255, 77, 122, 0.14)",
               background: "linear-gradient(180deg, rgba(201,241,105,0.05), rgba(15,18,24,0.72) 45%), rgba(15,18,24,0.72)",
             }}
           >

@@ -132,4 +132,19 @@ This repo ships a [`render.yaml`](./render.yaml) Blueprint that provisions **fou
    `QDRANT_URL`, `QDRANT_API_KEY`, `SUPABASE_URL`, `SUPABASE_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL_NAME`, `GEMINI_API_KEY`, `DAILY_API_KEY`, `DEEPGRAM_API_KEY`, `CARTESIA_API_KEY`, `LANGSMITH_API_KEY`, `OTEL_EXPORTER_ENDPOINT`.
 5. Redeploy the backend after saving env vars.
 
-> **Free-plan warning:** the backend pulls `torch`, `sentence-transformers`, and `transformers` (multi-GB, memory-heavy). Render's free web service tier (512MB RAM) is very likely to OOM at boot or hit build timeouts. If it fails, move the backend to at least the **Starter** plan.
+> **Free-plan warning:** the backend previously pulled `torch`, `sentence-transformers`, and `transformers` (multi-GB, memory-heavy) for local embeddings; this now calls the Gemini embeddings API instead, specifically so it fits Render's free tier (512MB RAM). If you re-introduce a local model, budget for at least the **Starter** plan.
+
+### Seeding data (why the catalog/orders pages are empty after first deploy)
+
+A fresh deploy has an empty Postgres and an empty Qdrant collection — the UI has nothing to show until you seed it. Two steps, run **once** after the backend is live and its `sync: false` env vars (Qdrant, Gemini, etc.) are filled in:
+
+1. **Open a shell on the backend service** — Render dashboard → `voicesell-backend` → **Shell** tab (top right). This gives you a terminal inside the running container.
+2. Run, in order:
+   ```bash
+   python -m scripts.ingest_olist      # loads the Olist product catalog into Postgres
+   python -m scripts.embed_products    # embeds each product via Gemini and upserts into Qdrant
+   ```
+   `ingest_olist` populates the `products` table (what `/catalog` reads). `embed_products` is what makes RAG-grounded chat answers and `/chat` semantic search work — skip it and the catalog page will show data, but the AI won't be able to find/recommend products by meaning.
+3. Refresh `/catalog` — products should now appear. Orders start empty and populate as real orders are placed through the chat/voice flow; there's no separate order-seeding step.
+
+If the Shell tab isn't available on your plan, the same two commands can be run as a Render **one-off Job** (dashboard → New → Job → same repo/service → command as above) instead.

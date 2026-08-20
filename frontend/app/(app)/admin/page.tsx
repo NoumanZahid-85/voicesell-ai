@@ -9,7 +9,6 @@ import {
   Package,
   ArrowClockwise,
   Heartbeat,
-  CheckCircle,
   MicrophoneStage,
 } from "@phosphor-icons/react";
 import { api, DEMO_CUSTOMER_ID } from "@/lib/api";
@@ -273,52 +272,6 @@ export default function AdminPage() {
               </tbody>
             </table>
           )}
-        </motion.div>
-
-        {/* ── Phase progress ── */}
-        <motion.div
-          className="panel"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          style={{ overflow: "hidden" }}
-        >
-          <div style={{ padding: "13px 20px", borderBottom: "1px solid var(--line)" }}>
-            <span className="label-mono">Build Status</span>
-          </div>
-          <div style={{ padding: "12px 20px 16px" }}>
-            {[
-              { label: "Phase 1 — Foundation, DB, Docker", done: true },
-              { label: "Phase 2 — RAG Engine (Qdrant + LangGraph)", done: true },
-              { label: "Phase 3 — Voice Pipeline (Pipecat + Daily)", done: true },
-              { label: "Phase 4 — Order Management CRUD", done: true },
-              { label: "Phase 5 — Upsell & Recommendation Engine", done: true },
-              { label: "Phase 6 — Next.js Frontend (this app)", done: true },
-              { label: "Phase 7 — Production Hardening & Observability", done: false },
-              { label: "Phase 8 — Deployment & Integration Testing", done: false },
-            ].map((p, i) => (
-              <div
-                key={i}
-                className="ledger-row"
-                style={{
-                  padding: "9px 0",
-                  borderBottom: i < 7 ? "1px solid var(--line)" : "none",
-                }}
-              >
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                  {p.done ? (
-                    <CheckCircle size={16} color="var(--ok)" weight="fill" />
-                  ) : (
-                    <span className="led led-dim" />
-                  )}
-                  <span style={{ fontSize: "0.85rem", color: p.done ? "var(--text-hi)" : "var(--text-low)" }}>
-                    {p.label}
-                  </span>
-                </span>
-                {p.done && <span className="chip" style={{ background: "transparent" }}>DONE</span>}
-              </div>
-            ))}
-          </div>
         </motion.div>
       </div>
     </div>

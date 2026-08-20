@@ -43,7 +43,7 @@ try:
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.services.deepgram.stt import DeepgramSTTService
     from pipecat.services.deepgram.tts import DeepgramTTSService
-    from pipecat.transports.services.daily import DailyParams, DailyTransport
+    from pipecat.transports.daily.transport import DailyParams, DailyTransport
     from app.voice.processor import LangGraphProcessor
     VOICE_SUPPORTED = True
 except ImportError as e:
@@ -84,8 +84,8 @@ async def build_and_run_pipeline(
 ) -> None:
     if not VOICE_SUPPORTED:
         raise RuntimeError(
-            "Voice pipeline is not supported on Windows because daily-python lacks Windows binaries. "
-            f"Import error details: {VOICE_IMPORT_ERROR}"
+            "Voice pipeline failed to initialize — a required import is "
+            f"missing or broken on the server. Details: {VOICE_IMPORT_ERROR}"
         )
 
     settings = get_settings()

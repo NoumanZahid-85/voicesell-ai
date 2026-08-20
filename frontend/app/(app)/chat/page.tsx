@@ -142,7 +142,7 @@ export default function ChatPage() {
           if (attempt === 3) {
             setVoiceState("error");
             setConnError(
-              "The room was created but the audio pipeline did not start. The voice stack (daily-python) runs on Linux servers; on this machine, text chat remains fully functional."
+              "The room was created but the voice agent didn't join in time. This is usually transient — try again."
             );
           } else {
             check(attempt + 1);
@@ -382,7 +382,7 @@ export default function ChatPage() {
               >
                 <WarningCircle size={15} weight="fill" />
                 <span>
-                  Voice needs the Linux audio stack (daily-python). Text mode below is fully functional.
+                  Voice session couldn&apos;t connect. Text mode below is fully functional — try voice again in a moment.
                 </span>
               </div>
             )}
