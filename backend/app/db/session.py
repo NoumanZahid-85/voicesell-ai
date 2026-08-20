@@ -21,13 +21,33 @@ _engine = None
 _session_factory = None
 
 
+def _normalize_asyncpg_url(url: str) -> str:
+    """Force the asyncpg driver in the DB URL scheme.
+
+    Render's managed Postgres `fromDatabase` connection string is a plain
+    `postgresql://...` URI, which SQLAlchemy resolves to the sync psycopg2
+    dialect by default — not installed here, since this project uses
+    asyncpg for the async engine. Supabase URLs are usually already
+    `postgresql://` too. Rewrite any bare `postgresql://` /
+    `postgres://` scheme to `postgresql+asyncpg://`; leave an already
+    explicit `+asyncpg` (or other driver) scheme untouched.
+    """
+    if url.startswith("postgresql+"):
+        return url
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+
 def get_engine():
     """Lazy singleton engine — created once per process."""
     global _engine
     if _engine is None:
         settings = get_settings()
         _engine = create_async_engine(
-            settings.database_url,
+            _normalize_asyncpg_url(settings.database_url),
             echo=settings.debug,
             pool_size=5,
             max_overflow=10,
