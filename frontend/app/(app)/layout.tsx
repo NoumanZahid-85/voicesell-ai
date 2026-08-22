@@ -60,7 +60,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="sidebar-brand">
           <Waveform size={20} color="var(--signal)" weight="fill" />
           <span>
-            CALLIOPE <span style={{ color: "var(--signal)", fontWeight: 600, letterSpacing: "0.12em" }}>AI</span>
+            CALLIOPE
           </span>
         </div>
         <nav className="sidebar-nav">{NavList}</nav>
@@ -78,7 +78,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", color: "inherit" }}>
             <Waveform size={19} color="var(--signal)" weight="fill" />
             <span>
-              CALLIOPE <span style={{ color: "var(--signal)", fontWeight: 600, letterSpacing: "0.12em" }}>AI</span>
+              CALLIOPE
             </span>
           </Link>
         </div>

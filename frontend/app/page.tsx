@@ -100,7 +100,7 @@ export default function LandingPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <Waveform size={22} color="var(--signal)" weight="fill" />
           <span style={{ fontWeight: 750, fontSize: "1rem", letterSpacing: "-0.01em" }}>
-            CALLIOPE <span style={{ color: "var(--signal)" }}>AI</span>
+            CALLIOPE
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

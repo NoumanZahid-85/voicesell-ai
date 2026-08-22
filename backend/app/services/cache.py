@@ -27,7 +27,7 @@ _redis_enabled = True  # set to False if init fails
 
 CACHE_TTL_SECONDS = 86400  # 24h
 MEMORY_TTL_SECONDS = 7200  # 2h
-PENDING_ORDER_TTL_SECONDS = 120  # 2 min window to confirm an order action
+PENDING_ORDER_TTL_SECONDS = 300  # 5 min window to confirm an order action
 
 
 def get_redis():

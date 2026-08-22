@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 _GROQ_TTS_VOICE = "autumn"
 
 _GREETING = (
-    "Hello! I'm CALLIOPE, your AI shopping assistant. "
+    "Hello! I'm CALLIOPE, your shopping assistant. "
     "Ask me anything about our products, prices, or to place an order."
 )
 

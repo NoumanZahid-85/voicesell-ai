@@ -33,8 +33,18 @@ interface Caption {
   text: string;
 }
 
+const SESSION_STORAGE_KEY = "voicesell:session-id";
+const MESSAGES_STORAGE_KEY = "voicesell:messages";
+
 function useSessionId() {
-  const [id] = useState(() => `sess-${Math.random().toString(36).slice(2)}`);
+  const [id] = useState(() => {
+    if (typeof window === "undefined") return `sess-${Math.random().toString(36).slice(2)}`;
+    const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (existing) return existing;
+    const fresh = `sess-${Math.random().toString(36).slice(2)}`;
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, fresh);
+    return fresh;
+  });
   return id;
 }
 
@@ -48,14 +58,29 @@ const VOICE_LABEL: Record<VoiceState, string> = {
 export default function ChatPage() {
   const sessionId = useSessionId();
   const [mode, setMode] = useState<Mode>("text");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "agent",
-      text: "Hi! I'm CALLIOPE. Ask me anything about our product catalog, or say 'start voice' to switch to voice mode. I can also help you place and manage orders.",
-      ts: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.sessionStorage.getItem(MESSAGES_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as (Omit<Message, "ts"> & { ts: string })[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map((m) => ({ ...m, ts: new Date(m.ts) }));
+          }
+        }
+      } catch {
+        /* corrupt/old data — fall through to the default welcome message */
+      }
+    }
+    return [
+      {
+        id: "welcome",
+        role: "agent",
+        text: "Hi! I'm CALLIOPE. Ask me anything about our product catalog, or say 'start voice' to switch to voice mode. I can also help you place and manage orders.",
+        ts: new Date(),
+      },
+    ];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -72,6 +97,15 @@ export default function ChatPage() {
   // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Persist conversation across page navigation within this tab.
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(messages));
+    } catch {
+      /* storage full/unavailable — conversation just won't persist, non-fatal */
+    }
   }, [messages]);
 
   // ── Text chat ──────────────────────────────────────────────────────
@@ -124,6 +158,32 @@ export default function ChatPage() {
     setConnError(null);
     setCaption(null);
     try {
+      // Daily only allows one call-object instance per page. If a previous
+      // session's cleanup didn't run (e.g. the user navigated away mid-call),
+      // creating a new one throws "Duplicate DailyIframe instances are not
+      // allowed" — destroy any leftover first.
+      if (callRef.current) {
+        try {
+          await callRef.current.leave();
+          callRef.current.destroy();
+        } catch {
+          /* best-effort */
+        }
+        callRef.current = null;
+      }
+
+      // Fail fast with a clear message if the mic is blocked/missing,
+      // instead of letting Daily's join() hang waiting on a permission
+      // prompt the user can't see or already dismissed.
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStream.getTracks().forEach((t) => t.stop());
+      } catch {
+        throw new Error(
+          "Microphone access was blocked. Please allow microphone permission for this site and try again."
+        );
+      }
+
       const data = await api.voice.connect();
       setRoomUrl(data.room_url);
       setVoiceSessionId(data.session_id);
@@ -167,7 +227,12 @@ export default function ChatPage() {
         setConnError(ev?.errorMsg || "Voice call encountered an error.");
       });
 
-      await call.join({ url: data.room_url });
+      // Never let "connecting" hang forever — a stuck WebRTC handshake
+      // should surface a clear, retryable error instead of a silent spinner.
+      const joinTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Connection timed out. Please try again.")), 15000)
+      );
+      await Promise.race([call.join({ url: data.room_url }), joinTimeout]);
 
       setVoiceState("listening");
       setMessages((prev) => [
@@ -182,6 +247,14 @@ export default function ChatPage() {
     } catch (err: unknown) {
       setVoiceState("error");
       setConnError(err instanceof Error ? err.message : String(err));
+      if (callRef.current) {
+        try {
+          callRef.current.destroy();
+        } catch {
+          /* best-effort */
+        }
+        callRef.current = null;
+      }
     }
   }, []);
 
