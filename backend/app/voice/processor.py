@@ -38,6 +38,7 @@ try:
         UserStoppedSpeakingFrame,
     )
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+    from pipecat.transports.daily.transport import DailyOutputTransportMessageFrame
 except ImportError:
     # Define simple dummy classes so uvicorn compiles on Windows without dependencies
     class FrameProcessor: pass
@@ -45,6 +46,7 @@ except ImportError:
     class TranscriptionFrame: pass
     class LLMMessagesUpdateFrame: pass
     class TextFrame: pass
+    class DailyOutputTransportMessageFrame: pass
     class FrameDirection:
         DOWNSTREAM = 1
 
@@ -89,6 +91,7 @@ class LangGraphProcessor(FrameProcessor):
             if not transcript:
                 # Empty frame (noise) — do not invoke the agent
                 return
+            await self._send_caption("user", transcript)
             await self._handle_transcript(transcript)
         else:
             # Pass every other frame downstream unchanged
@@ -173,6 +176,7 @@ class LangGraphProcessor(FrameProcessor):
         sentences = _split_sentences(text)
         for sentence in sentences:
             if sentence:
+                await self._send_caption("agent", sentence)
                 await self.push_frame(TextFrame(text=sentence), FrameDirection.DOWNSTREAM)
 
         # Signal that we're done this turn — needed for barge-in reset state.
@@ -182,6 +186,22 @@ class LangGraphProcessor(FrameProcessor):
             LLMMessagesUpdateFrame(messages=[], run_llm=False),
             FrameDirection.DOWNSTREAM,
         )
+
+    async def _send_caption(self, role: str, text: str) -> None:
+        """Broadcast a live-caption event to the browser over Daily's data channel.
+
+        The frontend (a headless daily-js call object) listens for
+        "app-message" and renders this as a real-time subtitle line — so the
+        user sees their own words transcribed, and the agent's reply typed
+        out, while audio is still playing/being captured.
+        """
+        try:
+            await self.push_frame(
+                DailyOutputTransportMessageFrame(message={"role": role, "text": text}),
+                FrameDirection.DOWNSTREAM,
+            )
+        except Exception:  # noqa: BLE001 — captions are best-effort, never fatal
+            logger.debug("Caption broadcast failed (non-fatal)", exc_info=True)
 
 
 def _split_sentences(text: str) -> list[str]:

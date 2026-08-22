@@ -28,6 +28,11 @@ interface Message {
   ts: Date;
 }
 
+interface Caption {
+  role: "user" | "agent";
+  text: string;
+}
+
 function useSessionId() {
   const [id] = useState(() => `sess-${Math.random().toString(36).slice(2)}`);
   return id;
@@ -57,9 +62,12 @@ export default function ChatPage() {
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null);
   const [connError, setConnError] = useState<string | null>(null);
+  const [caption, setCaption] = useState<Caption | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const callRef = useRef<any>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -114,45 +122,63 @@ export default function ChatPage() {
   const startVoice = useCallback(async () => {
     setVoiceState("connecting");
     setConnError(null);
+    setCaption(null);
     try {
       const data = await api.voice.connect();
       setRoomUrl(data.room_url);
       setVoiceSessionId(data.session_id);
+
+      // Headless call object (no visible Daily UI) — this is what actually
+      // requests mic permission and publishes audio. The earlier hidden
+      // 1x1 iframe pointed at Daily's *prebuilt* room, which requires a
+      // visible "join" click to ever start streaming mic audio; since the
+      // iframe was invisible, that click could never happen and the
+      // agent never received any audio.
+      const DailyMod = await import("@daily-co/daily-js");
+      const Daily = DailyMod.default;
+      const call = Daily.createCallObject({
+        audioSource: true,
+        videoSource: false,
+      });
+      callRef.current = call;
+
+      call.on("app-message", (ev: { data?: Caption }) => {
+        if (ev?.data?.role && typeof ev.data.text === "string") {
+          if (ev.data.role === "user") {
+            setCaption({ role: "user", text: ev.data.text });
+          } else {
+            // Agent replies stream in sentence-by-sentence — append so the
+            // caption grows the way subtitles do, rather than replacing.
+            setCaption((prev) =>
+              prev?.role === "agent"
+                ? { role: "agent", text: `${prev.text} ${ev.data!.text}`.trim() }
+                : { role: "agent", text: ev.data!.text }
+            );
+          }
+        }
+      });
+
+      call.on("left-meeting", () => {
+        setVoiceState((s) => (s === "listening" ? "idle" : s));
+      });
+
+      call.on("error", (ev: { errorMsg?: string }) => {
+        setVoiceState("error");
+        setConnError(ev?.errorMsg || "Voice call encountered an error.");
+      });
+
+      await call.join({ url: data.room_url });
+
       setVoiceState("listening");
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now().toString(),
           role: "agent",
-          text: "Voice session active. The AI agent is listening via Daily WebRTC. Speak naturally!",
+          text: "Voice session active. Speak naturally — I'm listening.",
           ts: new Date(),
         },
       ]);
-
-      // Health probe: the pipeline unregisters the session if it crashes
-      // (e.g. daily-python has no Windows binaries). Verify the session
-      // actually came alive so we never show a dead "Live" state.
-      const check = async (attempt: number) => {
-        if (attempt > 3) return;
-        await new Promise((r) => setTimeout(r, 2000));
-        try {
-          const list = await api.voice.sessions();
-          const alive = list.some((s) => s.session_id === data.session_id);
-          if (alive) return;
-          if (attempt === 3) {
-            setVoiceState("error");
-            setConnError(
-              "The room was created but the voice agent didn't join in time. This is usually transient — try again."
-            );
-          } else {
-            check(attempt + 1);
-          }
-        } catch {
-          if (attempt === 3) setVoiceState("error");
-          else check(attempt + 1);
-        }
-      };
-      check(1);
     } catch (err: unknown) {
       setVoiceState("error");
       setConnError(err instanceof Error ? err.message : String(err));
@@ -160,6 +186,15 @@ export default function ChatPage() {
   }, []);
 
   const stopVoice = useCallback(async () => {
+    if (callRef.current) {
+      try {
+        await callRef.current.leave();
+        callRef.current.destroy();
+      } catch {
+        /* best-effort */
+      }
+      callRef.current = null;
+    }
     if (voiceSessionId) {
       try {
         await api.voice.disconnect(voiceSessionId);
@@ -171,7 +206,15 @@ export default function ChatPage() {
     setRoomUrl(null);
     setVoiceSessionId(null);
     setConnError(null);
+    setCaption(null);
   }, [voiceSessionId]);
+
+  // Clean up the call object if the component unmounts mid-session.
+  useEffect(() => {
+    return () => {
+      callRef.current?.destroy?.();
+    };
+  }, []);
 
   const voiceLed =
     voiceState === "listening" ? "led-signal led-live" :
@@ -390,14 +433,24 @@ export default function ChatPage() {
         )}
       </AnimatePresence>
 
-      {/* Daily iframe for voice (hidden) */}
-      {roomUrl && mode === "voice" && (
-        <iframe
-          src={roomUrl}
-          allow="microphone; autoplay"
-          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
-          title="Daily Voice Room"
-        />
+      {/* Live captions — mirrors what the mic/agent are producing in real time */}
+      {mode === "voice" && voiceState === "listening" && caption && (
+        <div
+          style={{
+            padding: "8px 20px",
+            borderTop: "1px solid var(--line)",
+            background: "var(--chrome-deep)",
+            fontSize: "0.86rem",
+            lineHeight: 1.5,
+            color: caption.role === "user" ? "var(--text-mid)" : "var(--signal)",
+          }}
+        >
+          <span className="label-mono" style={{ marginRight: 8, fontSize: "0.62rem", opacity: 0.7 }}>
+            {caption.role === "user" ? "YOU" : "CALLIOPE"}
+          </span>
+          {caption.text}
+          <span className="blink" style={{ marginLeft: 2 }}>▍</span>
+        </div>
       )}
 
       {/* ── Text input ── */}

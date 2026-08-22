@@ -46,13 +46,20 @@ def get_redis():
     try:
         import redis.asyncio as aioredis
 
-        _client = aioredis.from_url(
-            settings.redis_url,
+        client_kwargs = dict(
             decode_responses=True,
-            ssl_cert_reqs=None,  # Upstash rediss:// certs
             socket_connect_timeout=2,
             socket_timeout=2,
         )
+        if settings.redis_url.startswith("rediss://"):
+            # Only TLS connections use SSLConnection, which is the only
+            # connection class that accepts ssl_cert_reqs. Passing it
+            # unconditionally (even for plain redis://, e.g. Render's
+            # internal Key Value URL) makes redis-py 8.x raise
+            # "AbstractConnection.__init__() got an unexpected keyword
+            # argument 'ssl_cert_reqs'" on first use — every request.
+            client_kwargs["ssl_cert_reqs"] = None
+        _client = aioredis.from_url(settings.redis_url, **client_kwargs)
     except Exception as exc:
         logger.warning("Redis init failed — cache/memory disabled: %s", exc)
         _redis_enabled = False
@@ -124,6 +131,10 @@ async def get_history(session_id: str) -> list[dict]:
         raw = await r.lrange(_history_key(session_id), 0, -1)
         turns = [json.loads(item) for item in raw if item]
         return turns[-get_settings().rag_memory_turns :]
+    # safe_redis() suppresses exceptions raised mid-block (logs a warning
+    # and falls through here) — always return a list, never None, so
+    # callers doing history[-8:] never crash the whole request.
+    return []
 
 
 async def add_turn(session_id: str, user_msg: str, bot_msg: str) -> None:

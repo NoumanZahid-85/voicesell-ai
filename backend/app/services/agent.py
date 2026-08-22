@@ -558,7 +558,7 @@ async def _generate_reply(state: AgentState, session=None) -> str:  # noqa: ANN0
         system = GENERAL_SYSTEM_PROMPT
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-    for turn in state.get("history", [])[-8:]:
+    for turn in (state.get("history") or [])[-8:]:
         messages.append({"role": "user",      "content": turn["user"]})
         messages.append({"role": "assistant", "content": turn["bot"]})
     messages.append({"role": "user", "content": state["user_message"]})
