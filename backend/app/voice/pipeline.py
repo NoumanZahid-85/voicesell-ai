@@ -1,29 +1,40 @@
 """
-Pipecat voice pipeline factory — Phase 3 final: Deepgram for both STT and TTS.
+Pipecat voice pipeline factory — Groq for both STT and TTS.
 
-Why Deepgram for TTS:
-  - Cartesia free tier is 500 chars/month — exhausted immediately in testing.
-  - Deepgram's $200 free credit covers ~2.5 million chars of TTS (Aura model).
-  - Single API key for both STT + TTS = simpler secrets management.
-  - Deepgram Aura TTS latency (TTFA) is typically <200ms — well inside our
-    500ms total budget.
+Why Groq (switched from Deepgram):
+  - The Deepgram account/dashboard became inaccessible (locked out, no
+    support response) — can't rotate the key or manage billing, so we
+    moved off it entirely rather than block on a support ticket.
+  - Groq's Whisper (whisper-large-v3-turbo) speech-to-text free tier
+    covers 2,000 requests/day — plenty for a demo/internship project.
+  - Groq's Orpheus TTS (canopylabs/orpheus-v1-english) has a
+    free-tier-friendly daily allowance and reuses the SAME GROQ_API_KEY
+    already configured for the LLM — one fewer secret to manage.
+  - IMPORTANT one-time setup: the Orpheus English model requires
+    accepting its model terms once at
+    https://console.groq.com/playground?model=canopylabs/orpheus-v1-english
+    before the API key can use it (otherwise TTS calls 403).
 
 Pipeline shape:
   DailyTransport.input()  ← WebRTC audio in from browser
       ↓ audio frames
-  DeepgramSTTService       ← nova-3 streaming, endpointing=300ms
+  SileroVADAnalyzer        ← offline VAD — detects end-of-utterance,
+                              required since Groq STT is segmented
+                              (batch), not a live streaming socket
+  GroqSTTService            ← whisper-large-v3-turbo, one HTTP call per
+                              VAD-detected utterance
       ↓ TranscriptionFrame (final transcript)
-  SileroVADAnalyzer        ← offline VAD fallback (no API key)
-  LangGraphProcessor       ← our custom bridge: text → agent → text
+  LangGraphProcessor        ← our custom bridge: text → agent → text
       ↓ TextFrame(s) — one per sentence for early TTS start
-  DeepgramTTSService       ← Aura model, zero-shot streaming audio
+  GroqTTSService             ← Orpheus v1 English, voice "autumn"
       ↓ audio frames
   DailyTransport.output()  ← WebRTC audio out to browser
 
 Resilience notes:
   - Barge-in (allow_interruptions=True) is enabled — customer can speak
     mid-response and Pipecat cancels in-flight TTS immediately.
-  - Silence timeout is handled by Deepgram endpointing (300ms), not our code.
+  - Utterance boundaries are decided by Silero VAD (offline, no API
+    cost) since Groq STT is request/response, not a live socket.
   - Pipeline exceptions are caught in run() — the exception percolates to the
     asyncio.Task which triggers the session registry cleanup callback.
   - DB session is passed in from the API layer to reuse the connection pool.
@@ -41,8 +52,8 @@ try:
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineParams, PipelineTask
-    from pipecat.services.deepgram.stt import DeepgramSTTService
-    from pipecat.services.deepgram.tts import DeepgramTTSService
+    from pipecat.services.groq.stt import GroqSTTService
+    from pipecat.services.groq.tts import GroqTTSService
     from pipecat.transports.daily.transport import DailyParams, DailyTransport
     from app.voice.processor import LangGraphProcessor
     VOICE_SUPPORTED = True
@@ -56,8 +67,8 @@ except ImportError as e:
     class PipelineRunner: pass
     class PipelineParams: pass
     class PipelineTask: pass
-    class DeepgramSTTService: pass
-    class DeepgramTTSService: pass
+    class GroqSTTService: pass
+    class GroqTTSService: pass
     class DailyParams: pass
     class DailyTransport: pass
     class LangGraphProcessor: pass
@@ -66,9 +77,9 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Deepgram Aura voice — male, natural US English, clear diction.
-# Alternatives (all on $200 credit): aura-asteria-en (female), aura-zeus-en (male).
-_DEEPGRAM_VOICE = "aura-arcas-en"
+# Orpheus v1 English voices: autumn, diana, hannah, austin, daniel, troy.
+# "autumn" is a clear, natural female US English voice.
+_GROQ_TTS_VOICE = "autumn"
 
 _GREETING = (
     "Hello! I'm CALLIOPE, your AI shopping assistant. "
@@ -100,27 +111,20 @@ async def build_and_run_pipeline(
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=False,
-            transcription_enabled=False,   # Deepgram handles STT, not Daily
+            transcription_enabled=False,   # Groq handles STT, not Daily
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),  # offline VAD — no API cost
+            vad_analyzer=SileroVADAnalyzer(),  # offline VAD — segments audio for Groq STT
             vad_audio_passthrough=True,
         ),
     )
 
-    # ── Deepgram STT — nova-3 streaming ─────────────────────────────
-    # nova-3 is the fastest + most accurate model Deepgram offers.
-    # endpointing=300 → 300ms silence triggers end-of-utterance.
-    # interim_results=False → no partial transcripts hitting the agent.
-    stt = DeepgramSTTService(
-        api_key=settings.deepgram_api_key,
-        settings=DeepgramSTTService.Settings(
-            model="nova-3",
-            language="en-US",
-            smart_format=True,
-            punctuate=True,
-            endpointing=300,
-            interim_results=False,
-            utterance_end_ms=1000,
+    # ── Groq STT — Whisper large-v3-turbo ────────────────────────────
+    # Segmented (request/response), not a streaming socket — Silero VAD
+    # above decides utterance boundaries and hands Groq one clip at a time.
+    stt = GroqSTTService(
+        api_key=settings.groq_api_key,
+        settings=GroqSTTService.Settings(
+            model="whisper-large-v3-turbo",
         ),
     )
 
@@ -130,13 +134,15 @@ async def build_and_run_pipeline(
         session_id=session_id,
     )
 
-    # ── Deepgram Aura TTS ─────────────────────────────────────────────
-    # Aura-arcas-en: clear US male voice, ~$0.0135 / 1000 chars.
-    # With $200 credit ≈ 14.8 million chars ≈ millions of turns.
-    # sample_rate=24000 matches Daily's preferred output format.
-    tts = DeepgramTTSService(
-        api_key=settings.deepgram_api_key,
-        voice=_DEEPGRAM_VOICE,
+    # ── Groq Orpheus TTS ───────────────────────────────────────────────
+    # canopylabs/orpheus-v1-english, voice "autumn". Requires accepting
+    # the model's terms once in the Groq console before first use.
+    # sample_rate is fixed at 48000 Hz by the Groq TTS API itself.
+    tts = GroqTTSService(
+        api_key=settings.groq_api_key,
+        settings=GroqTTSService.Settings(
+            voice=_GROQ_TTS_VOICE,
+        ),
     )
 
     # ── Assemble pipeline ─────────────────────────────────────────────

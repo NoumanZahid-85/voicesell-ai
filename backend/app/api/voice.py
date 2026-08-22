@@ -80,9 +80,10 @@ def _require_voice_keys(settings: Settings) -> None:
     missing = []
     if not settings.daily_api_key:
         missing.append("DAILY_API_KEY")
-    if not settings.deepgram_api_key:
-        missing.append("DEEPGRAM_API_KEY")
-    # Cartesia is no longer required — Deepgram Aura handles TTS.
+    if not settings.groq_api_key:
+        missing.append("GROQ_API_KEY")
+    # Groq handles both STT (Whisper) and TTS (Orpheus) — Deepgram is no
+    # longer used by the voice pipeline.
     if missing:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

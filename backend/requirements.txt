@@ -135,6 +135,7 @@ anyio==4.14.2 \
     --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494 \
     --hash=sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f
     # via
+    #   groq
     #   httpx
     #   langsmith
     #   openai
@@ -486,10 +487,6 @@ daily-python==0.32.0 ; sys_platform != 'win32' \
     --hash=sha256:7f5598806733f08697bb19c39c0f54d99703d51d1d5f24e5f0312e0847df50cd \
     --hash=sha256:aee19106e3b65cedc5b00710a4c6f708bf5f7a0be5ec3add73e14675e6ec5ae1
     # via pipecat-ai
-deepgram-sdk==7.7.0 ; sys_platform != 'win32' \
-    --hash=sha256:25355b2e119f969c8614136e494ef30be91a06c56152a9cba49535ef3f18f82c \
-    --hash=sha256:4cce45c853d6caebbed62081d9118b915a2f3a2e54eb420ff5148c30e16dcffd
-    # via pipecat-ai
 defusedxml==0.7.1 ; sys_platform != 'win32' \
     --hash=sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69 \
     --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61
@@ -502,6 +499,7 @@ distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
     # via
+    #   groq
     #   langsmith
     #   openai
 dnspython==2.8.0 \
@@ -909,6 +907,10 @@ greenlet==3.5.5 \
     # via
     #   sqlalchemy
     #   voicesell-backend
+groq==1.6.0 ; sys_platform != 'win32' \
+    --hash=sha256:c4237ecf0053ba85fd926bb31cb4b178996310474b4618867994e3e40d8e3c02 \
+    --hash=sha256:fa16db582455db324adcff1b5908519474736872e28cd5c8fa2b8bef6860e12a
+    # via pipecat-ai
 grpcio==1.83.0 \
     --hash=sha256:009667eaf3dcd5224c713589cdc98e7ca4ed0ff0b61132c6b276e930eb83a2df \
     --hash=sha256:10b3fa0475eb572c9a81a6fe37fa16a9c500c0c91cfc148cac15692b7e3c2867 \
@@ -1035,9 +1037,9 @@ httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # via
-    #   deepgram-sdk
     #   fastapi
     #   fastapi-cloud-cli
+    #   groq
     #   huggingface-hub
     #   langchain-core
     #   langgraph-sdk
@@ -2201,9 +2203,9 @@ pydantic==2.13.4 \
     --hash=sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba \
     --hash=sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6
     # via
-    #   deepgram-sdk
     #   fastapi
     #   fastapi-cloud-cli
+    #   groq
     #   langchain-core
     #   langgraph
     #   langsmith
@@ -2307,9 +2309,7 @@ pydantic-core==2.46.4 \
     --hash=sha256:fbdb89b3e1c94a30cc5edfce477c6e6a5dc4d8f84665b455c27582f211a1c72c \
     --hash=sha256:fc010ab034c8c7452522748bf937df58020d256ccae0874463d1f4d01758af8e \
     --hash=sha256:fc3e9034a63de20e15e8ade85358bc6efc614008cab72898b4b4952bea0509ff
-    # via
-    #   deepgram-sdk
-    #   pydantic
+    # via pydantic
 pydantic-extra-types==2.11.1 \
     --hash=sha256:1722ea2bddae5628ace25f2aa685b69978ef533123e5638cfbddb999e0100ec1 \
     --hash=sha256:46792d2307383859e923d8fcefa82108b1a141f8a9c0198982b3832ab5ef1049
@@ -2973,6 +2973,7 @@ sniffio==1.3.1 \
     --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2 \
     --hash=sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc
     # via
+    #   groq
     #   langsmith
     #   openai
 soxr==1.0.0 ; sys_platform != 'win32' \
@@ -3133,8 +3134,8 @@ typing-extensions==4.16.0 \
     #   aiosignal
     #   alembic
     #   anyio
-    #   deepgram-sdk
     #   fastapi
+    #   groq
     #   grpcio
     #   huggingface-hub
     #   langchain-core
@@ -3488,7 +3489,6 @@ websockets==16.1.1 \
     --hash=sha256:fb9a0a6dc3d1b3986cb88091b6899f0396651e0f74e2c9766ab8d6ffc3842e29 \
     --hash=sha256:fce6c48559c86d1ac3632ccb1bebc7d5442fbe79bd9bb0e40379ee54be2a4051
     # via
-    #   deepgram-sdk
     #   langgraph-sdk
     #   langsmith
     #   pipecat-ai

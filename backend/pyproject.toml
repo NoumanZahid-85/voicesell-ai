@@ -26,7 +26,7 @@ dependencies = [
     # Phase 3 — voice pipeline (Linux/macOS only; daily-python has no Windows wheel).
     # In the Docker container (Linux) this installs automatically.
     # On Windows dev machines, install the mock extras (see [dependency-groups] below).
-    "pipecat-ai[daily,deepgram,silero]>=0.0.50 ; sys_platform != 'win32'",
+    "pipecat-ai[daily,groq,silero]>=0.0.50 ; sys_platform != 'win32'",
 ]
 
 [dependency-groups]
