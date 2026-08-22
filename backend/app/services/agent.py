@@ -207,7 +207,19 @@ def build_agent_graph(session, session_id: str = ""):
                         return state
                 # ── Order confirmation / cancellation ─────────────────
                 elif _is_affirmation(msg):
-                    state["order_result"] = await _execute_pending(session, sid, pending)
+                    try:
+                        state["order_result"] = await _execute_pending(session, sid, pending)
+                    except OrderError as exc:
+                        logger.warning(
+                            "Order execution failed for session=%s: %s", sid, exc
+                        )
+                        state["order_result"] = {
+                            "error": "order_failed",
+                            "message": (
+                                "Sorry, I couldn't complete that order just now. "
+                                "Could you please say what you'd like to order again?"
+                            ),
+                        }
                     return state
                 elif _is_negation(msg):
                     await clear_pending_order(sid)
@@ -543,6 +555,11 @@ async def _generate_reply(state: AgentState, session=None) -> str:  # noqa: ANN0
                 "I'm not sure what order action you'd like. "
                 "You can say things like: 'order 2 keyboards', "
                 "'cancel order 12345', or 'show my orders'."
+            )
+
+        if error == "order_failed":
+            return order_result.get(
+                "message", "Sorry, I couldn't complete that order. Please try again."
             )
 
         if error:

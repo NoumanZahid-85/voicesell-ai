@@ -42,18 +42,37 @@ async def chat(
 
     # 3) LangGraph agent
     graph = build_agent_graph(db, session_id=req.session_id)
-    state = await graph.ainvoke(
-        {
-            "user_message": req.message,
-            "session_id":   req.session_id,
-            "history":      history,
-            "intent":       "",
-            "context":      "",
-            "chunks":       [],
-            "order_result": None,
-            "reply":        "",
-        }
-    )
+    try:
+        state = await graph.ainvoke(
+            {
+                "user_message": req.message,
+                "session_id":   req.session_id,
+                "history":      history,
+                "intent":       "",
+                "context":      "",
+                "chunks":       [],
+                "order_result": None,
+                "reply":        "",
+            }
+        )
+    except Exception:
+        # Any unhandled exception anywhere in the agent graph (RAG lookup,
+        # order creation, LLM call, etc.) used to propagate as a raw 500,
+        # which browsers surface as an opaque "Failed to fetch" with no
+        # useful info. Log the real error server-side and answer the
+        # customer gracefully instead of crashing their whole session.
+        logger.exception(
+            "Unhandled error in agent graph for session=%s message=%r",
+            req.session_id, req.message,
+        )
+        return ChatResponse(
+            reply=(
+                "Sorry, I hit a snag processing that. Could you try again? "
+                "If it was an order, please resend your request."
+            ),
+            sources=[],
+            cached=False,
+        )
 
     reply = state["reply"]
     sources = [
