@@ -51,7 +51,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, OrderItem, OrderStatus, Product
+from app.db.models import Customer, Order, OrderItem, OrderStatus, Product
 from app.schemas.orders import OrderResponse
 
 logger = logging.getLogger(__name__)
@@ -238,9 +238,26 @@ async def create_order(
             })
 
         # ── Phase 2: create order ────────────────────────────────────
+        customer_uuid = uuid.UUID(customer_id)
+        # Get-or-create: this app has no signup flow, so the frontend
+        # always sends a fixed demo customer_id. That row was never
+        # seeded, so every order insert was failing with
+        # "orders_customer_id_fkey" (500). Guard against any customer_id
+        # that doesn't exist yet rather than relying on seed data alone.
+        existing_customer = await session.get(Customer, customer_uuid)
+        if existing_customer is None:
+            session.add(
+                Customer(
+                    id=customer_uuid,
+                    email=f"demo-{customer_uuid}@voicesell.local",
+                    name="Demo Customer",
+                )
+            )
+            await session.flush()
+
         order = Order(
             id=uuid.uuid4(),
-            customer_id=uuid.UUID(customer_id),
+            customer_id=customer_uuid,
             status=OrderStatus.CONFIRMED,   # auto-confirm for demo
             total_amount=round(total, 2),
             idempotency_key=idempotency_key,
