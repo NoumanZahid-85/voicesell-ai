@@ -443,7 +443,7 @@ export default function LandingPage() {
           <span style={{ fontSize: "0.85rem", fontWeight: 650 }}>CALLIOPE</span>
         </span>
         <span className="mono-id" style={{ fontSize: "0.66rem" }}>
-          PHASE 6 FRONTEND — NEXT.JS · PIPECAT · LANGGRAPH · QDRANT
+          Made by <span className="emphasis">Nouman</span>
         </span>
       </footer>
     </div>
