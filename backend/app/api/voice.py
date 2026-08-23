@@ -73,6 +73,13 @@ class SessionInfo(BaseModel):
     turn_count: int
 
 
+class SessionEvent(BaseModel):
+    ts: str
+    session_id: str
+    event: str
+    detail: str = ""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _require_voice_keys(settings: Settings) -> None:
@@ -98,13 +105,17 @@ def _make_task_cleanup(session_id: str):
     """Return a done_callback that auto-removes the session from the registry."""
 
     def _cleanup(task: asyncio.Task) -> None:
-        session_registry.unregister(session_id)
         if task.cancelled():
+            session_registry.record_event(session_id, "cancelled")
             logger.info("Pipeline task for session=%s was cancelled.", session_id)
         elif exc := task.exception():
+            detail = f"{type(exc).__name__}: {exc}"
+            session_registry.record_event(session_id, "crashed", detail)
             logger.error("Pipeline task for session=%s crashed: %s", session_id, exc)
         else:
+            session_registry.record_event(session_id, "finished")
             logger.info("Pipeline task for session=%s finished cleanly.", session_id)
+        session_registry.unregister(session_id)
 
     return _cleanup
 
@@ -184,6 +195,7 @@ async def create_voice_session(
         task=task,
     )
     session_registry.register(voice_session)
+    session_registry.record_event(session_id, "started", room.name)
 
     logger.info(
         "Voice session started: id=%s room=%s active_sessions=%d",
@@ -320,3 +332,17 @@ async def list_sessions(
         )
         for s in session_registry.all_sessions()
     ]
+
+
+@router.get(
+    "/events",
+    response_model=list[SessionEvent],
+    summary="Recent voice pipeline lifecycle events, including crashes",
+)
+async def voice_events() -> list[SessionEvent]:
+    """
+    Rolling log of pipeline starts/crashes/cancels. Because Render's free
+    plan hides logs, this is how a silent bot gets diagnosed externally:
+    connect once, then read this — a crashed pipeline shows its exception.
+    """
+    return [SessionEvent(**e) for e in session_registry.recent_events()]

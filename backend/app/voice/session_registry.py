@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,31 @@ class VoiceSession:
     @property
     def age_seconds(self) -> float:
         return time.time() - self.started_at
+
+
+# ── Recent lifecycle events (crash visibility without log access) ────
+#
+# Render's free plan exposes no logs, so pipeline crashes used to be
+# invisible. Every session lifecycle transition is appended here and
+# served by GET /api/v1/voice/sessions so a silent bot can be diagnosed
+# from the outside.
+
+_MAX_EVENTS = 40
+
+_events: deque[dict] = deque(maxlen=_MAX_EVENTS)
+
+
+def record_event(session_id: str, event: str, detail: str = "") -> None:
+    _events.append({
+        "ts": time.strftime("%H:%M:%S"),
+        "session_id": session_id[:8],
+        "event": event,
+        "detail": detail[:500],
+    })
+
+
+def recent_events() -> list[dict]:
+    return list(_events)
 
 
 # ── In-memory registry ──────────────────────────────────────────────

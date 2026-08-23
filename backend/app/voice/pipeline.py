@@ -54,7 +54,11 @@ try:
     from pipecat.pipeline.task import PipelineParams, PipelineTask
     from pipecat.services.groq.stt import GroqSTTService
     from pipecat.services.groq.tts import GroqTTSService
-    from pipecat.transports.daily.transport import DailyParams, DailyTransport
+    from pipecat.transports.daily.transport import (
+        DailyOutputTransportMessageFrame,
+        DailyParams,
+        DailyTransport,
+    )
     from app.voice.processor import LangGraphProcessor
     VOICE_SUPPORTED = True
 except ImportError as e:
@@ -69,6 +73,7 @@ except ImportError as e:
     class PipelineTask: pass
     class GroqSTTService: pass
     class GroqTTSService: pass
+    class DailyOutputTransportMessageFrame: pass
     class DailyParams: pass
     class DailyTransport: pass
     class LangGraphProcessor: pass
@@ -182,18 +187,35 @@ async def build_and_run_pipeline(
     @transport.event_handler("on_first_participant_joined")
     async def on_joined(transport, participant):  # noqa: ARG001
         logger.info("Participant joined session=%s id=%s", session_id, participant.get("id"))
-        # Push greeting directly to TTS — bypasses the agent for instant hello.
-        await task.queue_frames([TextFrame(text=_GREETING)])
+        from app.voice import session_registry
+        session_registry.record_event(session_id, "participant_joined")
+        # Caption the greeting so the customer SEES the hello even if the
+        # audio output path ever fails — silence should never look like a
+        # dead connection.
+        await task.queue_frames(
+            [
+                DailyOutputTransportMessageFrame(
+                    message={"role": "agent", "text": _GREETING}
+                ),
+                TextFrame(text=_GREETING),
+            ]
+        )
 
     # ── Event: participant leaves ─────────────────────────────────────
     @transport.event_handler("on_participant_left")
     async def on_left(transport, participant, reason):  # noqa: ARG001
         logger.info("Participant left session=%s reason=%s", session_id, reason)
+        from app.voice import session_registry
+        session_registry.record_event(session_id, "participant_left", str(reason))
         await task.cancel()
 
     @transport.event_handler("on_call_state_updated")
     async def on_state(transport, state):  # noqa: ARG001
-        logger.debug("Daily call state=%s session=%s", state, session_id)
+        # INFO + event log: whether the BOT itself joined the room is the
+        # single most important external visibility signal for a silent bot.
+        logger.info("Daily call state=%s session=%s", state, session_id)
+        from app.voice import session_registry as _reg
+        _reg.record_event(session_id, f"call_{state}")
 
     # ── Run ───────────────────────────────────────────────────────────
     try:
