@@ -8,6 +8,7 @@ import {
   CaretUp,
   MagnifyingGlass,
   ShoppingCartSimple,
+  XCircle,
 } from "@phosphor-icons/react";
 import { api, DEMO_CUSTOMER_ID } from "@/lib/api";
 import type { Order, OrderStatus } from "@/lib/types";
@@ -21,8 +22,17 @@ import {
 } from "@/app/components/ui";
 import { formatCurrency, formatOrderDate } from "@/lib/format";
 
-function OrderRow({ order }: { order: Order }) {
+function OrderRow({
+  order,
+  onCancel,
+  cancelling,
+}: {
+  order: Order;
+  onCancel: (order: Order) => void;
+  cancelling: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const cancellable = order.status === "pending" || order.status === "confirmed";
 
   return (
     <>
@@ -98,6 +108,39 @@ function OrderRow({ order }: { order: Order }) {
                       NO LINE ITEMS AVAILABLE FOR THIS ORDER
                     </p>
                   )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginTop: 14,
+                      paddingTop: 12,
+                      borderTop: "1px solid var(--line)",
+                    }}
+                  >
+                    <span className="mono-id" style={{ fontSize: "0.66rem", color: "var(--text-low)" }}>
+                      {cancellable
+                        ? "CANCELLING RESTORES THE STOCK IMMEDIATELY"
+                        : order.status === "cancelled"
+                          ? "THIS ORDER WAS ALREADY CANCELLED — STOCK WAS RESTORED"
+                          : "SHIPPED/DELIVERED ORDERS CANNOT BE CANCELLED"}
+                    </span>
+                    {cancellable && (
+                      <button
+                        className="btn-danger btn-sm"
+                        disabled={cancelling}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onCancel(order);
+                        }}
+                        style={{ padding: "7px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}
+                      >
+                        <XCircle size={13} weight="fill" />
+                        {cancelling ? "Removing…" : "Remove order"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </motion.div>
             </td>
@@ -114,6 +157,7 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<OrderStatus | "all">("all");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -127,6 +171,25 @@ export default function OrdersPage() {
       setLoading(false);
     }
   }, []);
+
+  const cancelOrder = useCallback(async (order: Order) => {
+    if (
+      !window.confirm(
+        `Remove order ${order.id.slice(0, 8)}… (${formatCurrency(order.total_amount)})? Stock will be restored immediately.`
+      )
+    ) {
+      return;
+    }
+    setCancellingId(order.id);
+    try {
+      await api.cancelOrder(order.id, DEMO_CUSTOMER_ID);
+      await fetchOrders();
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCancellingId(null);
+    }
+  }, [fetchOrders]);
 
   useEffect(() => {
     const run = async () => {
@@ -273,7 +336,12 @@ export default function OrdersPage() {
               <tbody>
                 <AnimatePresence>
                   {filtered.map((order) => (
-                    <OrderRow key={order.id} order={order} />
+                    <OrderRow
+                      key={order.id}
+                      order={order}
+                      onCancel={cancelOrder}
+                      cancelling={cancellingId === order.id}
+                    />
                   ))}
                 </AnimatePresence>
               </tbody>

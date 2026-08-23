@@ -3,6 +3,7 @@
 // HTTP error handling, timeouts, and JSON parsing.
 
 import type {
+  AdminStats,
   CategoryListResponse,
   ChatResponse,
   HealthData,
@@ -108,6 +109,11 @@ export const api = {
 
   orders: (customerId: string, limit = 50) =>
     fetchJSON<OrderListResponse>(`/api/v1/orders?customer_id=${customerId}&limit=${limit}`),
+
+  cancelOrder: (orderId: string, customerId: string) =>
+    send(`/api/v1/orders/${orderId}?customer_id=${customerId}`, { method: "DELETE" }),
+
+  adminStats: () => fetchJSON<AdminStats>("/api/v1/admin/stats", undefined, 20_000),
 
   categories: () => fetchJSON<CategoryListResponse>("/api/v1/categories", undefined, 10_000),
 

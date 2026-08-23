@@ -92,6 +92,41 @@ logger = logging.getLogger(__name__)
 _GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english"
 _GROQ_TTS_VOICE = "autumn"
 
+
+class RobustGroqTTSService(GroqTTSService):
+    """GroqTTSService with whole-response WAV parsing.
+
+    pipecat 1.7.0's run_tts wraps EVERY chunk from response.iter_bytes()
+    in wave.open() — but a WAV arrives as many arbitrary network chunks,
+    so the second chunk (raw PCM, no RIFF header) raises and TTS dies
+    silently mid-utterance. Symptom: the bot joined rooms, captions
+    streamed, but not a single word was ever audible. Here we read the
+    complete body, parse the WAV exactly once, and emit one audio frame.
+    """
+
+    async def run_tts(self, text: str, context_id):  # noqa: ANN001
+        import io
+        import wave as wavemod
+        from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame
+
+        try:
+            response = await self._client.audio.speech.create(
+                model=self._settings.model,
+                voice=self._settings.voice,
+                response_format="wav",
+                speed=self._settings.speed,
+                input=text,
+            )
+            data = await response.read()
+            await self.stop_ttfb_metrics()
+            with wavemod.open(io.BytesIO(data)) as w:
+                pcm = w.readframes(w.getnframes())
+                yield TTSAudioRawFrame(
+                    pcm, w.getframerate(), w.getnchannels(), context_id=context_id
+                )
+        except Exception as exc:  # noqa: BLE001
+            yield ErrorFrame(error=f"Groq TTS failed: {exc}")
+
 _GREETING = (
     "Hello! I'm CALLIOPE, your shopping assistant. "
     "Ask me anything about our products, prices, or to place an order."
@@ -148,9 +183,11 @@ async def build_and_run_pipeline(
     # ── Groq TTS (Orpheus v1 English) ─────────────────────────────────
     # Orpheus outputs a fixed 48 kHz WAV stream (same as the old PlayAI),
     # so audio_out_sample_rate=48000 below remains correct.
-    tts = GroqTTSService(
+    # RobustGroqTTSService replaces pipecat's chunk-by-chunk WAV parsing,
+    # which crashed on multi-chunk responses and muted the bot entirely.
+    tts = RobustGroqTTSService(
         api_key=settings.groq_api_key,
-        settings=GroqTTSService.Settings(
+        settings=RobustGroqTTSService.Settings(
             model=_GROQ_TTS_MODEL,
             voice=_GROQ_TTS_VOICE,
         ),
