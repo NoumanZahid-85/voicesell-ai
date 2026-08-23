@@ -51,11 +51,45 @@ async def chat(
     # probe reveals whether staging persisted and how triage routed.
     debug_info = None
     if req.debug:
-        pending_snapshot = await cache.get_pending_order(req.session_id)
+        diag: dict = {}
+
+        # Per-op-class probes: FAQ strings demonstrably work in prod while
+        # pending keys and history lists do not — isolate exactly which
+        # operation fails and surface its exception.
+        try:
+            client = cache.get_redis()
+            diag["client_present"] = client is not None
+            if client is not None:
+                try:
+                    await client.set("diag:string", "ok", ex=60)
+                    diag["string_set_get"] = await client.get("diag:string")
+                except Exception as exc:  # noqa: BLE001
+                    diag["string_error"] = f"{type(exc).__name__}: {exc}"
+                try:
+                    await client.rpush("diag:list", "a")
+                    await client.expire("diag:list", 60)
+                    diag["list_rpush_lrange"] = await client.lrange("diag:list", 0, -1)
+                except Exception as exc:  # noqa: BLE001
+                    diag["list_error"] = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            diag["client_error"] = f"{type(exc).__name__}: {exc}"
+
+        try:
+            await cache.set_pending_order(req.session_id, {"probe": True})
+            diag["pending_roundtrip"] = await cache.get_pending_order(req.session_id)
+        except Exception as exc:  # noqa: BLE001
+            diag["pending_error"] = f"{type(exc).__name__}: {exc}"
+
+        try:
+            diag["history_len"] = len(await cache.get_history(req.session_id))
+        except Exception as exc:  # noqa: BLE001
+            diag["history_error"] = f"{type(exc).__name__}: {exc}"
+
         debug_info = {
             "gate_utterance": gate_utterance,
             "sid": req.session_id,
-            "pending_before": pending_snapshot,
+            "pending_before": await cache.get_pending_order(req.session_id),
+            "redis_diag": diag,
         }
 
     # 3) LangGraph agent
