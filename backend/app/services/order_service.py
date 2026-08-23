@@ -104,6 +104,7 @@ class OrderLineInput:
 
 @dataclass
 class OrderItemResult:
+    product_id: str
     product_name: str
     quantity: int
     unit_price: float
@@ -297,6 +298,7 @@ async def create_order(
             total_amount=order.total_amount,
             items=[
                 OrderItemResult(
+                    product_id=str(d["product"].id),
                     product_name=d["product"].name,
                     quantity=d["quantity"],
                     unit_price=d["unit_price"],
@@ -464,6 +466,7 @@ def _to_result(order: Order) -> OrderResult:
         total_amount=order.total_amount,
         items=[
             OrderItemResult(
+                product_id=str(item.product_id),
                 product_name=item.product.name if item.product else str(item.product_id),
                 quantity=item.quantity,
                 unit_price=item.unit_price,

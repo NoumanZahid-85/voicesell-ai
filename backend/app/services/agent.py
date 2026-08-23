@@ -493,7 +493,14 @@ async def _execute_pending(session, sid: str, pending: dict) -> dict:
             "status": "order_created",
             "order_id": result.order_id[:8],
             "total": result.total_amount,
-            "items": [{"name": i.product_name, "qty": i.quantity} for i in result.items],
+            "items": [
+                {
+                    "name": i.product_name,
+                    "qty": i.quantity,
+                    "product_id": i.product_id,
+                }
+                for i in result.items
+            ],
         }
 
     if action == "cancel":
@@ -626,7 +633,12 @@ async def _rebuild_and_execute(session, sid: str, history: list[dict]) -> dict:
                     "order_id": result.order_id[:8],
                     "total": result.total_amount,
                     "items": [
-                        {"name": i.product_name, "qty": i.quantity} for i in result.items
+                        {
+                            "name": i.product_name,
+                            "qty": i.quantity,
+                            "product_id": i.product_id,
+                        }
+                        for i in result.items
                     ],
                 }
             except OrderError as exc:
@@ -709,9 +721,15 @@ async def _generate_reply(state: AgentState, session=None) -> str:  # noqa: ANN0
                 try:
                     from uuid import UUID as _UUID
                     rec_svc = RecommendationService(session)
-                    # Extract product_ids from this order's quote
-                    quote_items = order_result.get("quote", [])
-                    pid_strs = [q["product_id"] for q in quote_items if q.get("product_id")]
+                    # Anchor on the products actually purchased — the gate
+                    # execution path returns them in items (quote only
+                    # exists on the pre-confirmation path).
+                    item_list = order_result.get("items") or []
+                    pid_strs = [
+                        it.get("product_id")
+                        for it in item_list
+                        if isinstance(it, dict) and it.get("product_id")
+                    ]
                     pids = [_UUID(p) for p in pid_strs if p]
 
                     if pids:
