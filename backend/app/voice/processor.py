@@ -51,7 +51,12 @@ except ImportError:
         DOWNSTREAM = 1
 
 from app.services import cache as cache_svc
-from app.services.agent import build_agent_graph, is_confirmation_utterance
+from app.services.agent import (
+    INTENT_ORDER,
+    build_agent_graph,
+    classify_intent,
+    is_confirmation_utterance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +121,15 @@ class LangGraphProcessor(FrameProcessor):
         logger.info("VoiceAgent received transcript: %r (session=%s)", text[:80], self.session_id)
 
         try:
-            # 1) FAQ cache hit — fast path. Skipped for yes/no gate answers:
-            # their replies are conversation-specific and must not be cached.
-            gate_utterance = is_confirmation_utterance(text)
-            if not gate_utterance:
+            # 1) FAQ cache hit — fast path. Skipped for transactional
+            # messages (yes/no gate answers AND order intents): their
+            # replies are conversation-specific, and serving a cached quote
+            # would skip staging the order entirely.
+            stateful = (
+                is_confirmation_utterance(text)
+                or classify_intent(text) == INTENT_ORDER
+            )
+            if not stateful:
                 cached = await cache_svc.get_cached_answer(text)
                 if cached:
                     logger.info("Cache HIT for session=%s", self.session_id)
@@ -151,7 +161,7 @@ class LangGraphProcessor(FrameProcessor):
             reply: str = state.get("reply", "").strip() or _FALLBACK_PHRASE
 
             # 4) Persist cache + history (best-effort, non-blocking)
-            if not gate_utterance:
+            if not stateful:
                 asyncio.create_task(cache_svc.set_cached_answer(text, reply))
             asyncio.create_task(cache_svc.add_turn(self.session_id, text, reply))
 

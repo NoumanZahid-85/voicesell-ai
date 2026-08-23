@@ -1,10 +1,10 @@
-"""
-Chat endpoint — text Q&A via the LangGraph RAG agent.
+﻿"""
+Chat endpoint â€” text Q&A via the LangGraph RAG agent.
 
 Flow:
-  1. Normalize query → check Redis FAQ cache → return instantly on hit.
+  1. Normalize query â†’ check Redis FAQ cache â†’ return instantly on hit.
   2. Load conversation history (last N turns) from Redis.
-  3. Run the LangGraph agent (triage → rag → respond) with LiteLLM.
+  3. Run the LangGraph agent (triage â†’ rag â†’ respond) with LiteLLM.
   4. Cache the answer, append the turn to session memory.
 """
 
@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.chat import ChatRequest, ChatResponse, ChatSource
 from app.services import cache
-from app.services.agent import build_agent_graph, is_confirmation_utterance
+from app.services.agent import (
+    INTENT_ORDER,
+    build_agent_graph,
+    classify_intent,
+    is_confirmation_utterance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +37,25 @@ async def chat(
 ) -> ChatResponse:
     """Answer a customer question with RAG-grounded text."""
 
-    # Yes/no answers to a staged action must never touch the FAQ cache:
-    # their replies are conversation-specific ("Your order has been placed…")
-    # and caching them replays stale answers for every future "yes".
-    gate_utterance = is_confirmation_utterance(req.message)
+    # Transactional messages must never touch the FAQ cache:
+    #   - yes/no answers to a staged action (their replies are conversation-
+    #     specific; caching them replays stale answers for every future "yes")
+    #   - order-intent messages (the reply is a price QUOTE and the act of
+    #     producing it stages the order in Redis â€” serving a cached quote
+    #     silently skips staging, so the following "yes" finds nothing and
+    #     the whole confirmation flow dies. This was the production bug.)
+    stateful = (
+        is_confirmation_utterance(req.message)
+        or classify_intent(req.message) == INTENT_ORDER
+    )
 
-    # 1) FAQ cache — skip LLM entirely on a hit
-    if not gate_utterance:
+    # 1) FAQ cache â€” skip LLM entirely on a hit
+    if not stateful:
         cached_reply = await cache.get_cached_answer(req.message)
         if cached_reply:
+            # Memory still needs this turn, or the conversation history
+            # diverges from what the customer actually experienced.
+            await cache.add_turn(req.session_id, req.message, cached_reply)
             return ChatResponse(reply=cached_reply, sources=[], cached=True)
 
     # 2) Conversation memory
@@ -54,7 +69,7 @@ async def chat(
         diag: dict = {}
 
         # Per-op-class probes: FAQ strings demonstrably work in prod while
-        # pending keys and history lists do not — isolate exactly which
+        # pending keys and history lists do not â€” isolate exactly which
         # operation fails and surface its exception.
         try:
             client = cache.get_redis()
@@ -86,7 +101,7 @@ async def chat(
             diag["history_error"] = f"{type(exc).__name__}: {exc}"
 
         debug_info = {
-            "gate_utterance": gate_utterance,
+            "gate_utterance": stateful,
             "sid": req.session_id,
             "pending_before": await cache.get_pending_order(req.session_id),
             "redis_diag": diag,
@@ -105,7 +120,7 @@ async def chat(
                 "chunks":         [],
                 "order_result":   None,
                 "reply":          "",
-                # Phase 5 upsell fields — must be present in state or LangGraph
+                # Phase 5 upsell fields â€” must be present in state or LangGraph
                 # raises a KeyError when the respond_node accesses them.
                 "upsell_done":    False,
                 "upsell_product": None,
@@ -148,8 +163,8 @@ async def chat(
         debug_info["order_error"] = order_result.get("error")
         debug_info["pending_after"] = await cache.get_pending_order(req.session_id)
 
-    # 4) Cache + memory (best-effort) — never cache gate utterances
-    if not gate_utterance:
+    # 4) Cache + memory (best-effort) â€” never cache gate utterances
+    if not stateful:
         await cache.set_cached_answer(req.message, reply)
     await cache.add_turn(req.session_id, req.message, reply)
 
