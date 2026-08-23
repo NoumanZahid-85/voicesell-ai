@@ -131,6 +131,18 @@ class RecommendationService:
             r for r in merged.values()
             if r.stock_quantity > 0 and r.score >= _MIN_SCORE
         ]
+
+        # ── Step 5: Guarantee ≥1 suggestion ───────────────────────────
+        # The upsell loop is the product's core methodology — an order must
+        # always come with at least one relevant add-on offer. If neither
+        # association rules nor vector similarity cleared the quality bar,
+        # fall back to a catalog pick from the same category (or anything
+        # in stock) rather than returning nothing.
+        if not qualified and product_ids:
+            fallback = await self._catalog_fallback(product_ids, excluded)
+            if fallback:
+                qualified = [fallback]
+
         qualified.sort(key=lambda r: r.score, reverse=True)
         return qualified[:limit]
 
@@ -267,6 +279,60 @@ class RecommendationService:
 
         recs.sort(key=lambda r: r.score, reverse=True)
         return recs
+
+    async def _catalog_fallback(
+        self, product_ids: list[UUID], excluded: set[str]
+    ) -> Recommendation | None:
+        """
+        Last-resort suggestion so every order gets an upsell offer.
+
+        Picks an in-stock product from the same category as the ordered item
+        (cheapest first — a natural add-on), falling back to any in-stock
+        product. Never suggests something the customer just ordered.
+        """
+        if not product_ids:
+            return None
+        try:
+            anchor = (await self.session.execute(
+                select(Product).where(Product.id == product_ids[0])
+            )).scalar_one_or_none()
+            if anchor is None:
+                return None
+
+            stmt = (
+                select(Product)
+                .where(Product.stock_quantity > 0)
+                .order_by(Product.price.asc())
+                .limit(10)
+            )
+            if anchor.category_id is not None:
+                stmt = (
+                    select(Product)
+                    .where(Product.stock_quantity > 0)
+                    .where(Product.category_id == anchor.category_id)  # type: ignore[arg-type]
+                    .order_by(Product.price.asc())
+                    .limit(10)
+                )
+            rows = (await self.session.execute(stmt)).scalars().all()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Catalog fallback query failed: %s", exc)
+            return None
+
+        for product in rows:
+            if str(product.id) in excluded:
+                continue
+            return Recommendation(
+                product_id=product.id,
+                product_name=product.name,
+                price=float(product.price),
+                stock_quantity=product.stock_quantity,
+                source="catalog",
+                score=_MIN_SCORE,
+                reasoning=(
+                    f"The {product.name} pairs well with what you just ordered."
+                ),
+            )
+        return None
 
 
 # ── Convenience builder ───────────────────────────────────────────────

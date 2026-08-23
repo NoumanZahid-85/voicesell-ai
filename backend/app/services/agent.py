@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import TypedDict
 
@@ -143,7 +144,10 @@ def build_agent_graph(session, session_id: str = ""):
         msg = state["user_message"].lower().strip()
         if sid and (_is_affirmation(msg) or _is_negation(msg)):
             pending = await get_pending_order(sid)
-            if pending:
+            # History fallback: if Redis lost the staged action (observed in
+            # production), the conversation itself still proves a confirmation
+            # is awaited — route to the gate instead of RAG gibberish.
+            if pending or _history_awaits_confirmation(state.get("history") or []):
                 state["intent"] = INTENT_ORDER
                 return state
         state["intent"] = classify_intent(state["user_message"])
@@ -183,60 +187,93 @@ def build_agent_graph(session, session_id: str = ""):
         # ── Step 1: confirmation pending? ────────────────────────────
         if sid:
             pending = await get_pending_order(sid)
-            if pending:
-                # ── Upsell acceptance / rejection ─────────────────────
-                if pending.get("type") == "upsell":
-                    rec_svc = RecommendationService(session)
-                    if _is_affirmation(msg):
-                        # Log acceptance
-                        try:
-                            import uuid as _uuid
-                            await rec_svc.log_recommendation(
-                                session_id=sid,
-                                product_id=_uuid.UUID(pending["product_id"]),
-                                source=pending.get("source", "unknown"),
-                                was_accepted=True,
-                            )
-                        except Exception as exc:
-                            logger.warning("Upsell log failed: %s", exc)
-                        await clear_pending_order(sid)
-                        state["order_result"] = {"status": "upsell_accepted",
-                                                  "product_name": pending.get("product_name", "")}
-                        return state
-                    if _is_negation(msg):
-                        # Log rejection
-                        try:
-                            import uuid as _uuid
-                            await rec_svc.log_recommendation(
-                                session_id=sid,
-                                product_id=_uuid.UUID(pending["product_id"]),
-                                source=pending.get("source", "unknown"),
-                                was_accepted=False,
-                            )
-                        except Exception as exc:
-                            logger.warning("Upsell log failed: %s", exc)
-                        await clear_pending_order(sid)
-                        state["order_result"] = {"status": "upsell_declined"}
-                        return state
-                # ── Order confirmation / cancellation ─────────────────
-                elif _is_affirmation(msg):
+            last_bot = _last_bot_text(state.get("history") or [])
+            low_bot = last_bot.lower()
+            upsell_prompt_open = "would you like to add one" in low_bot
+
+            # ── Upsell acceptance / rejection ────────────────────────
+            if pending and pending.get("type") == "upsell":
+                rec_svc = RecommendationService(session)
+                if _is_affirmation(msg):
+                    # Log acceptance
                     try:
-                        state["order_result"] = await _execute_pending(session, sid, pending)
-                    except OrderError as exc:
-                        logger.warning(
-                            "Order execution failed for session=%s: %s", sid, exc
+                        import uuid as _uuid
+                        await rec_svc.log_recommendation(
+                            session_id=sid,
+                            product_id=_uuid.UUID(pending["product_id"]),
+                            source=pending.get("source", "unknown"),
+                            was_accepted=True,
                         )
-                        state["order_result"] = {
-                            "error": "order_failed",
-                            "message": (
-                                "Sorry, I couldn't complete that order just now. "
-                                "Could you please say what you'd like to order again?"
-                            ),
-                        }
-                    return state
-                elif _is_negation(msg):
+                    except Exception as exc:
+                        logger.warning("Upsell log failed: %s", exc)
                     await clear_pending_order(sid)
-                    state["order_result"] = {"status": "cancelled_by_user"}
+                    # An accepted upsell must actually place the add-on
+                    # order — saying "I've added it" without creating an
+                    # order made the whole upsell loop cosmetic.
+                    state["order_result"] = await _place_addon_order(
+                        session, sid, str(pending.get("product_name", ""))
+                    )
+                    return state
+                if _is_negation(msg):
+                    # Log rejection
+                    try:
+                        import uuid as _uuid
+                        await rec_svc.log_recommendation(
+                            session_id=sid,
+                            product_id=_uuid.UUID(pending["product_id"]),
+                            source=pending.get("source", "unknown"),
+                            was_accepted=False,
+                        )
+                    except Exception as exc:
+                        logger.warning("Upsell log failed: %s", exc)
+                    await clear_pending_order(sid)
+                    state["order_result"] = {"status": "upsell_declined"}
+                    return state
+
+            # ── Order confirmation / cancellation ─────────────────────
+            if pending and _is_affirmation(msg):
+                try:
+                    state["order_result"] = await _execute_pending(session, sid, pending)
+                except OrderError as exc:
+                    logger.warning(
+                        "Order execution failed for session=%s: %s", sid, exc
+                    )
+                    state["order_result"] = {
+                        "error": "order_failed",
+                        "message": (
+                            "Sorry, I couldn't complete that order just now. "
+                            "Could you please say what you'd like to order again?"
+                        ),
+                    }
+                return state
+            if pending and _is_negation(msg):
+                await clear_pending_order(sid)
+                state["order_result"] = {"status": "cancelled_by_user"}
+                return state
+
+            # ── History fallback gate ──────────────────────────────────
+            # Redis lost the staged action (production bug) — but the last
+            # assistant turn proves what the customer is confirming.
+            if not pending and (_is_affirmation(msg) or _is_negation(msg)):
+                if upsell_prompt_open:
+                    if _is_affirmation(msg):
+                        extracted_upsell = _upsell_product_from_text(last_bot)
+                        if extracted_upsell:
+                            state["order_result"] = await _place_addon_order(
+                                session, sid, extracted_upsell
+                            )
+                            return state
+                        state["order_result"] = {"error": "parse_failed"}
+                        return state
+                    state["order_result"] = {"status": "upsell_declined"}
+                    return state
+                if _history_awaits_confirmation(state.get("history") or []):
+                    if _is_affirmation(msg):
+                        state["order_result"] = await _rebuild_and_execute(
+                            session, sid, state.get("history") or []
+                        )
+                    else:
+                        state["order_result"] = {"status": "cancelled_by_user"}
                     return state
 
         # ── Step 2: extract action via LLM ───────────────────────────
@@ -470,6 +507,156 @@ async def _execute_pending(session, sid: str, pending: dict) -> dict:
     return {"error": "unknown_pending_action"}
 
 
+# ── History-fallback gate helpers ─────────────────────────────────────
+
+# Phrases our own reply templates use when a confirmation is on the table.
+_CONFIRM_MARKERS = (
+    "shall i place this order",
+    "say yes to confirm",
+    "are you sure you want to cancel",
+)
+_UPSELL_MARKER = "would you like to add one"
+
+
+def _last_bot_text(history: list[dict]) -> str:
+    """Text of the most recent assistant turn ('' when history is empty)."""
+    if not history:
+        return ""
+    last = history[-1] or {}
+    bot = last.get("bot")
+    return bot.strip() if isinstance(bot, str) else ""
+
+
+def _history_awaits_confirmation(history: list[dict]) -> bool:
+    low = _last_bot_text(history).lower()
+    return any(m in low for m in _CONFIRM_MARKERS) or _UPSELL_MARKER in low
+
+
+def _upsell_product_from_text(bot_text: str) -> str:
+    """Extract the offered product name from our own upsell templates.
+
+    Templates (build_upsell_message):
+      "...picked up the {name} — it's ${price}. Would you like to add one?"
+      "...like the {name} (${price}), which pairs well..."
+    """
+    m = re.search(r"picked up the (.+?) — it's \$[\d.]+", bot_text)
+    if not m:
+        m = re.search(r"also like the (.+?) \(\$[\d.]+\)", bot_text)
+    return m.group(1).strip() if m else ""
+
+
+def _is_pure_gate_utterance(text: str) -> bool:
+    """True only for short bare confirmations ('yes', 'nope', 'go ahead').
+
+    Used when scanning history so real requests that merely START with an
+    acknowledgment ('ok, I want two lotions') are still processed as orders.
+    """
+    t = text.lower().strip()
+    return len(t.split()) <= 3 and (_is_affirmation(t) or _is_negation(t))
+
+
+async def _place_addon_order(session, sid: str, product_name: str) -> dict:
+    """Create a 1-unit add-on order for an accepted upsell suggestion."""
+    if not product_name:
+        return {"error": "parse_failed"}
+    lines = [OrderLineInput(product_name=product_name, quantity=1)]
+    try:
+        result = await create_order(
+            session,
+            customer_id=_ANON_CUSTOMER_ID,
+            lines=lines,
+            idempotency_key=build_idempotency_key(f"{sid}:upsell", lines),
+        )
+        return {
+            "status": "upsell_accepted",
+            "product_name": result.items[0].product_name if result.items else product_name,
+            "order_id": result.order_id[:8],
+            "total": result.total_amount,
+        }
+    except OrderError as exc:
+        logger.warning("Add-on order failed for session=%s: %s", sid, exc)
+        return {
+            "error": "order_failed",
+            "message": (
+                "Sorry, I couldn't add that to your orders just now. "
+                "You can ask me to order it separately in a moment."
+            ),
+        }
+
+
+async def _rebuild_and_execute(session, sid: str, history: list[dict]) -> dict:
+    """
+    Re-derive and execute the action the customer already quoted-approved.
+
+    Redis lost the staged action, so walk backwards through recent turns,
+    find the last real request ("order two lotions" / "cancel order X"),
+    and run it. Safe against double-execution: the idempotency key is
+    deterministic from session + items, so a replay collapses onto the
+    original order instead of duplicating it.
+    """
+    for turn in reversed(history[-6:]):
+        user_text = ((turn or {}).get("user") or "").strip()
+        if not user_text or _is_pure_gate_utterance(user_text):
+            continue
+        extracted = await _extract_order_intent(user_text)
+        if not extracted:
+            continue
+        action = extracted.get("action")
+
+        if action == "create":
+            lines = [
+                OrderLineInput(
+                    product_name=item.get("name", ""),
+                    quantity=int(item.get("quantity", 1)),
+                )
+                for item in extracted.get("items", [])
+                if item.get("name")
+            ]
+            if not lines:
+                continue
+            try:
+                result = await create_order(
+                    session,
+                    customer_id=_ANON_CUSTOMER_ID,
+                    lines=lines,
+                    idempotency_key=build_idempotency_key(sid or "anon", lines),
+                )
+                return {
+                    "status": "order_created",
+                    "order_id": result.order_id[:8],
+                    "total": result.total_amount,
+                    "items": [
+                        {"name": i.product_name, "qty": i.quantity} for i in result.items
+                    ],
+                }
+            except OrderError as exc:
+                logger.warning(
+                    "Rebuilt order failed for session=%s: %s", sid, exc
+                )
+                return {
+                    "error": "order_failed",
+                    "message": (
+                        "Sorry, I couldn't complete that order just now. "
+                        "Could you please say what you'd like to order again?"
+                    ),
+                }
+
+        if action == "cancel":
+            oid = extracted.get("order_id", "")
+            if not oid:
+                continue
+            try:
+                result = await cancel_order(
+                    session, order_id=oid, customer_id=_ANON_CUSTOMER_ID
+                )
+                return {"status": "order_cancelled", "order_id": result.order_id[:8]}
+            except OrderError as exc:
+                return {"error": str(exc)}
+
+    logger.info("History fallback found no actionable request (session=%s)", sid)
+    return {"error": "parse_failed"}
+
+
 # Placeholder customer ID used when customer auth is not yet wired (Phase 6).
 # In production this will come from the session's JWT.
 _ANON_CUSTOMER_ID = "00000000-0000-0000-0000-000000000001"
@@ -557,6 +744,14 @@ async def _generate_reply(state: AgentState, session=None) -> str:  # noqa: ANN0
 
         if status == "upsell_accepted":
             pname = order_result.get("product_name", "that product")
+            oid   = order_result.get("order_id", "")
+            total = order_result.get("total")
+            if oid:
+                return (
+                    f"Great! I've placed a separate order for the {pname} "
+                    f"— order number {oid}, total ${total:.2f}. "
+                    "Is there anything else I can help you with?"
+                )
             return (
                 f"Great! I've added {pname} to a new order for you. "
                 "Is there anything else I can help you with?"

@@ -193,6 +193,87 @@ async def create_voice_session(
     return ConnectResponse(session_id=session_id, room_url=room.url)
 
 
+@router.get(
+    "/selftest",
+    summary="Server-side Groq STT/TTS round-trip using this deployment's keys",
+)
+async def voice_selftest(
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """
+    Diagnose voice silence WITHOUT needing a browser/WebRTC session.
+
+    Synthesizes a phrase with Groq TTS (Orpheus), then transcribes the
+    resulting WAV back with Groq STT (Whisper) — using the exact API key
+    this deployment runs with. Reports per-stage status so a missing model
+    terms acceptance or bad key is visible immediately.
+    """
+    import httpx
+
+    report: dict = {
+        "groq_key_present": bool(settings.groq_api_key),
+        "daily_key_present": bool(settings.daily_api_key),
+        "tts_model": "canopylabs/orpheus-v1-english",
+        "stt_model": "whisper-large-v3-turbo",
+        "tts": None,
+        "stt": None,
+    }
+
+    if not settings.groq_api_key:
+        report["error"] = "GROQ_API_KEY not configured on this deployment"
+        return report
+
+    headers = {"Authorization": f"Bearer {settings.groq_api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            # ── Stage 1: TTS ──────────────────────────────────────────
+            tts_resp = await client.post(
+                "https://api.groq.com/openai/v1/audio/speech",
+                headers=headers,
+                json={
+                    "model": "canopylabs/orpheus-v1-english",
+                    "voice": "autumn",
+                    "input": "Hello, this is CALLIOPE. Can you hear me clearly?",
+                    "response_format": "wav",
+                },
+            )
+            tts_ok = tts_resp.status_code == 200 and len(tts_resp.content) > 1000
+            report["tts"] = {
+                "ok": tts_ok,
+                "status": tts_resp.status_code,
+                "bytes": len(tts_resp.content),
+                "content_type": tts_resp.headers.get("content-type", ""),
+                "detail": "" if tts_ok else tts_resp.text[:300],
+            }
+
+            if not tts_ok:
+                return report
+
+            # ── Stage 2: STT (transcribe what we just synthesized) ────
+            stt_resp = await client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files={"file": ("selftest.wav", tts_resp.content, "audio/wav")},
+                data={"model": "whisper-large-v3-turbo"},
+            )
+            stt_ok = stt_resp.status_code == 200
+            report["stt"] = {
+                "ok": stt_ok,
+                "status": stt_resp.status_code,
+                "transcript": stt_resp.json().get("text", "") if stt_ok else None,
+                "detail": "" if stt_ok else stt_resp.text[:300],
+            }
+    except Exception as exc:  # noqa: BLE001
+        report["error"] = f"{type(exc).__name__}: {exc}"
+
+    report["verdict"] = (
+        "voice services fully operational — silence is in the WebRTC/pipeline layer"
+        if report["stt"] and report["stt"]["ok"]
+        else "voice service failure detected — see tts/stt details above"
+    )
+    return report
+
+
 @router.delete(
     "/connect/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
