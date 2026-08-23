@@ -46,6 +46,18 @@ async def chat(
     # 2) Conversation memory
     history = await cache.get_history(req.session_id)
 
+    # TEMPORARY gate diagnostics (remove once the confirmation-gate prod issue is solved):
+    # reports what the gate will see BEFORE the graph runs, so a staged-then-"yes"
+    # probe reveals whether staging persisted and how triage routed.
+    debug_info = None
+    if req.debug:
+        pending_snapshot = await cache.get_pending_order(req.session_id)
+        debug_info = {
+            "gate_utterance": gate_utterance,
+            "sid": req.session_id,
+            "pending_before": pending_snapshot,
+        }
+
     # 3) LangGraph agent
     graph = build_agent_graph(db, session_id=req.session_id)
     try:
@@ -95,9 +107,15 @@ async def chat(
         for chunk in state["chunks"]
     ]
 
+    if debug_info is not None:
+        debug_info["intent"] = state.get("intent")
+        order_result = state.get("order_result") or {}
+        debug_info["order_status"] = order_result.get("status")
+        debug_info["order_error"] = order_result.get("error")
+
     # 4) Cache + memory (best-effort) — never cache gate utterances
     if not gate_utterance:
         await cache.set_cached_answer(req.message, reply)
     await cache.add_turn(req.session_id, req.message, reply)
 
-    return ChatResponse(reply=reply, sources=sources, cached=False)
+    return ChatResponse(reply=reply, sources=sources, cached=False, debug=debug_info)

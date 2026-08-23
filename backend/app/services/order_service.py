@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models import Customer, Order, OrderItem, OrderStatus, Product
 from app.schemas.orders import OrderResponse
@@ -323,13 +324,22 @@ async def create_order(
 
 
 async def _fetch_order_by_idem_key(session: AsyncSession, key: str) -> OrderResult:
-    stmt = select(Order).where(Order.idempotency_key == key)
+    stmt = select(Order).options(*_ORDER_WITH_ITEMS).where(Order.idempotency_key == key)
     result = await session.execute(stmt)
     order = result.scalar_one_or_none()
     if not order:
         raise OrderError("Idempotency collision but original order not found.")
-    await session.refresh(order, ["items"])
     return _to_result(order)
+
+
+# Eager-load items AND each item's product. Accessing order.items[i].product
+# without this triggers a synchronous lazy-load inside async SQLAlchemy
+# (MissingGreenlet) — which 500'd GET /orders and DELETE /orders/{id} in
+# production while POST/create kept working (its products were already in
+# the session identity map).
+_ORDER_WITH_ITEMS = (
+    selectinload(Order.items).selectinload(OrderItem.product),
+)
 
 
 async def get_order(session: AsyncSession, order_id: str, customer_id: str) -> OrderResult:
@@ -340,6 +350,7 @@ async def get_order(session: AsyncSession, order_id: str, customer_id: str) -> O
     """
     stmt = (
         select(Order)
+        .options(*_ORDER_WITH_ITEMS)
         .where(
             Order.id == uuid.UUID(order_id),  # type: ignore[arg-type]
             Order.customer_id == uuid.UUID(customer_id),  # type: ignore[arg-type]
@@ -349,7 +360,6 @@ async def get_order(session: AsyncSession, order_id: str, customer_id: str) -> O
     order = result.scalar_one_or_none()
     if not order:
         raise OrderNotFound(order_id)
-    await session.refresh(order, ["items"])
     return _to_result(order)
 
 
@@ -364,6 +374,7 @@ async def get_order_response(
     """
     stmt = (
         select(Order)
+        .options(*_ORDER_WITH_ITEMS)
         .where(
             Order.id == uuid.UUID(order_id),  # type: ignore[arg-type]
             Order.customer_id == uuid.UUID(customer_id),  # type: ignore[arg-type]
@@ -373,7 +384,6 @@ async def get_order_response(
     order = result.scalar_one_or_none()
     if not order:
         raise OrderNotFound(order_id)
-    await session.refresh(order, ["items"])
     return OrderResponse.model_validate(order)
 
 
@@ -392,6 +402,7 @@ async def cancel_order(
     """
     stmt = (
         select(Order)
+        .options(*_ORDER_WITH_ITEMS)
         .where(
             Order.id == uuid.UUID(order_id),  # type: ignore[arg-type]
             Order.customer_id == uuid.UUID(customer_id),  # type: ignore[arg-type]
@@ -405,9 +416,6 @@ async def cancel_order(
 
     if order.status not in (OrderStatus.PENDING, OrderStatus.CONFIRMED):
         raise OrderNotCancellable(order.status)
-
-    # Load items so we can restore stock
-    await session.refresh(order, ["items"])
 
     try:
         # Restore stock for each item
@@ -439,17 +447,14 @@ async def list_customer_orders(
     """Return the most recent `limit` orders for a customer."""
     stmt = (
         select(Order)
+        .options(*_ORDER_WITH_ITEMS)
         .where(Order.customer_id == uuid.UUID(customer_id))  # type: ignore[arg-type]
         .order_by(Order.created_at.desc())  # type: ignore[attr-defined]
         .limit(limit)
     )
     result = await session.execute(stmt)
     orders = result.scalars().all()
-    results = []
-    for order in orders:
-        await session.refresh(order, ["items"])
-        results.append(_to_result(order))
-    return results
+    return [_to_result(order) for order in orders]
 
 
 def _to_result(order: Order) -> OrderResult:
