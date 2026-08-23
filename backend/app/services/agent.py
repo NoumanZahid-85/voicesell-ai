@@ -132,7 +132,20 @@ def build_agent_graph(session, session_id: str = ""):
 
     # ── Triage ───────────────────────────────────────────────────────
 
-    def triage_node(state: AgentState) -> AgentState:
+    async def triage_node(state: AgentState) -> AgentState:
+        sid = state.get("session_id") or session_id
+        # Confirmation Gate routing: classify_intent() has no concept of
+        # conversation state, so a bare "yes"/"no" classifies as a product
+        # question and RAG answers gibberish while the staged action sits in
+        # Redis until its TTL expires. If something is actually pending (an
+        # order awaiting confirmation, or an upsell offer), yes/no utterances
+        # belong to the order node's gate — route them there.
+        msg = state["user_message"].lower().strip()
+        if sid and (_is_affirmation(msg) or _is_negation(msg)):
+            pending = await get_pending_order(sid)
+            if pending:
+                state["intent"] = INTENT_ORDER
+                return state
         state["intent"] = classify_intent(state["user_message"])
         return state
 
@@ -392,6 +405,17 @@ def _is_negation(text: str) -> bool:
     NEGATIONS = {"no", "nope", "cancel it", "don't", "never mind",
                  "stop", "abort", "forget it", "not now", "negative"}
     return any(n in text for n in NEGATIONS)
+
+
+def is_confirmation_utterance(text: str) -> bool:
+    """True if the message reads like a yes/no answer to a staged action.
+
+    Shared with the API layer so such messages bypass the FAQ cache — caching
+    replies to bare "yes"/"no" poisons the cache across sessions (the next
+    customer's "yes" would replay a previous conversation's answer).
+    """
+    t = text.lower().strip()
+    return _is_affirmation(t) or _is_negation(t)
 
 
 def decide_gate_action(pending: dict | None, utterance: str) -> str:

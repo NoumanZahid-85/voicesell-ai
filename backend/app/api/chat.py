@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.schemas.chat import ChatRequest, ChatResponse, ChatSource
 from app.services import cache
-from app.services.agent import build_agent_graph
+from app.services.agent import build_agent_graph, is_confirmation_utterance
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,16 @@ async def chat(
 ) -> ChatResponse:
     """Answer a customer question with RAG-grounded text."""
 
+    # Yes/no answers to a staged action must never touch the FAQ cache:
+    # their replies are conversation-specific ("Your order has been placed…")
+    # and caching them replays stale answers for every future "yes".
+    gate_utterance = is_confirmation_utterance(req.message)
+
     # 1) FAQ cache — skip LLM entirely on a hit
-    cached_reply = await cache.get_cached_answer(req.message)
-    if cached_reply:
-        return ChatResponse(reply=cached_reply, sources=[], cached=True)
+    if not gate_utterance:
+        cached_reply = await cache.get_cached_answer(req.message)
+        if cached_reply:
+            return ChatResponse(reply=cached_reply, sources=[], cached=True)
 
     # 2) Conversation memory
     history = await cache.get_history(req.session_id)
@@ -89,8 +95,9 @@ async def chat(
         for chunk in state["chunks"]
     ]
 
-    # 4) Cache + memory (best-effort)
-    await cache.set_cached_answer(req.message, reply)
+    # 4) Cache + memory (best-effort) — never cache gate utterances
+    if not gate_utterance:
+        await cache.set_cached_answer(req.message, reply)
     await cache.add_turn(req.session_id, req.message, reply)
 
     return ChatResponse(reply=reply, sources=sources, cached=False)
