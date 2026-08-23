@@ -77,13 +77,15 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Primary TTS: PlayAI via Groq — production-ready, no model-terms gate.
-# If your account has already accepted Orpheus terms at
+# Primary TTS: Orpheus v1 English via Groq.
+# playai-tts was DECOMMISSIONED by Groq (API now returns 400
+# "model_decommissioned") — every synthesis failed, so the bot joined rooms
+# but could never speak. Orpheus is Groq's only remaining English TTS.
+# IMPORTANT one-time setup: this model requires accepting its terms once at
 # https://console.groq.com/playground?model=canopylabs/orpheus-v1-english
-# you can switch back to canopylabs/orpheus-v1-english; "autumn" then becomes
-# the correct voice name. PlayAI voice names are different (see Groq docs).
-_GROQ_TTS_MODEL = "playai-tts"
-_GROQ_TTS_VOICE = "Fritz-PlayAI"  # Clear, natural English voice for PlayAI
+# (org admin action) — otherwise the API returns 400 model_terms_required.
+_GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english"
+_GROQ_TTS_VOICE = "autumn"
 
 _GREETING = (
     "Hello! I'm CALLIOPE, your shopping assistant. "
@@ -138,9 +140,9 @@ async def build_and_run_pipeline(
         session_id=session_id,
     )
 
-    # ── Groq TTS (PlayAI) ──────────────────────────────────────────────
-    # Uses playai-tts — production-ready, no model-terms gate.
-    # sample_rate is fixed at 48000 Hz by Groq's TTS API.
+    # ── Groq TTS (Orpheus v1 English) ─────────────────────────────────
+    # Orpheus outputs a fixed 48 kHz WAV stream (same as the old PlayAI),
+    # so audio_out_sample_rate=48000 below remains correct.
     tts = GroqTTSService(
         api_key=settings.groq_api_key,
         settings=GroqTTSService.Settings(

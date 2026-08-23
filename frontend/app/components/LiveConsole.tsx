@@ -120,8 +120,11 @@ export function LiveChip() {
     let alive = true;
     const check = async () => {
       try {
-        const h = await api.health();
-        if (alive) setState(h.status === "ok" ? "live" : "down");
+        await api.health();
+        // Any HTTP response means the backend itself is reachable — the
+        // System Console below already shows Postgres/Qdrant health per-row,
+        // so a "degraded" dependency must not flip this badge to Offline.
+        if (alive) setState("live");
       } catch {
         if (alive) setState("down");
       }

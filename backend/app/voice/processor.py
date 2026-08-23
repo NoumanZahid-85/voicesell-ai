@@ -220,4 +220,32 @@ def _split_sentences(text: str) -> list[str]:
     import re
     # Split on '. ', '! ', '? ' but keep the punctuation with the sentence.
     parts = re.split(r"(?<=[.!?])\s+", text)
-    return [p.strip() for p in parts if p.strip()]
+    sentences = [p.strip() for p in parts if p.strip()]
+    # Groq's Orpheus TTS rejects inputs over 200 characters with HTTP 400 —
+    # an unguarded long sentence would silently drop that whole reply.
+    # Further split oversized chunks at word boundaries.
+    return [
+        chunk
+        for sentence in sentences
+        for chunk in _split_long_chunk(sentence)
+    ]
+
+
+_MAX_TTS_CHARS = 190  # safety margin under Orpheus's 200-char limit
+
+
+def _split_long_chunk(sentence: str) -> list[str]:
+    """Split a single sentence into <=_MAX_TTS_CHARS pieces at word boundaries."""
+    if len(sentence) <= _MAX_TTS_CHARS:
+        return [sentence]
+    chunks: list[str] = []
+    remaining = sentence
+    while len(remaining) > _MAX_TTS_CHARS:
+        cut = remaining.rfind(" ", 0, _MAX_TTS_CHARS)
+        if cut <= 0:
+            cut = _MAX_TTS_CHARS  # pathological no-space case — hard split
+        chunks.append(remaining[:cut].strip())
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return [c for c in chunks if c]
