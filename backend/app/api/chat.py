@@ -112,6 +112,7 @@ async def chat(
         order_result = state.get("order_result") or {}
         debug_info["order_status"] = order_result.get("status")
         debug_info["order_error"] = order_result.get("error")
+        debug_info["pending_after"] = await cache.get_pending_order(req.session_id)
 
     # 4) Cache + memory (best-effort) — never cache gate utterances
     if not gate_utterance:
