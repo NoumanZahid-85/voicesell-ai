@@ -127,14 +127,17 @@ class LangGraphProcessor(FrameProcessor):
             state = await asyncio.wait_for(
                 self._agent.ainvoke(
                     {
-                        "user_message": text,
-                        "session_id":   self.session_id,
-                        "history":      history,
-                        "intent":       "",
-                        "context":      "",
-                        "chunks":       [],
-                        "order_result": None,
-                        "reply":        "",
+                        "user_message":   text,
+                        "session_id":     self.session_id,
+                        "history":        history,
+                        "intent":         "",
+                        "context":        "",
+                        "chunks":         [],
+                        "order_result":   None,
+                        "reply":          "",
+                        # Phase 5 upsell guard fields — required by AgentState
+                        "upsell_done":    False,
+                        "upsell_product": None,
                     }
                 ),
                 timeout=_AGENT_TIMEOUT_S,

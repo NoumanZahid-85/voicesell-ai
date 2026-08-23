@@ -77,9 +77,13 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Orpheus v1 English voices: autumn, diana, hannah, austin, daniel, troy.
-# "autumn" is a clear, natural female US English voice.
-_GROQ_TTS_VOICE = "autumn"
+# Primary TTS: PlayAI via Groq — production-ready, no model-terms gate.
+# If your account has already accepted Orpheus terms at
+# https://console.groq.com/playground?model=canopylabs/orpheus-v1-english
+# you can switch back to canopylabs/orpheus-v1-english; "autumn" then becomes
+# the correct voice name. PlayAI voice names are different (see Groq docs).
+_GROQ_TTS_MODEL = "playai-tts"
+_GROQ_TTS_VOICE = "Fritz-PlayAI"  # Clear, natural English voice for PlayAI
 
 _GREETING = (
     "Hello! I'm CALLIOPE, your shopping assistant. "
@@ -134,13 +138,13 @@ async def build_and_run_pipeline(
         session_id=session_id,
     )
 
-    # ── Groq Orpheus TTS ───────────────────────────────────────────────
-    # canopylabs/orpheus-v1-english, voice "autumn". Requires accepting
-    # the model's terms once in the Groq console before first use.
-    # sample_rate is fixed at 48000 Hz by the Groq TTS API itself.
+    # ── Groq TTS (PlayAI) ──────────────────────────────────────────────
+    # Uses playai-tts — production-ready, no model-terms gate.
+    # sample_rate is fixed at 48000 Hz by Groq's TTS API.
     tts = GroqTTSService(
         api_key=settings.groq_api_key,
         settings=GroqTTSService.Settings(
+            model=_GROQ_TTS_MODEL,
             voice=_GROQ_TTS_VOICE,
         ),
     )

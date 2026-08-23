@@ -97,7 +97,7 @@ async function send(path: string, init?: RequestInit): Promise<void> {
 }
 
 export const api = {
-  health: () => fetchJSON<HealthData>("/health", undefined, 5_000, false),
+  health: () => fetchJSON<HealthData>("/health", undefined, 15_000, true), // retry once — cold-start can take ~14s
 
   chat: (message: string, sessionId: string) =>
     fetchJSON<ChatResponse>("/api/v1/chat", {

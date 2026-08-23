@@ -45,14 +45,18 @@ async def chat(
     try:
         state = await graph.ainvoke(
             {
-                "user_message": req.message,
-                "session_id":   req.session_id,
-                "history":      history,
-                "intent":       "",
-                "context":      "",
-                "chunks":       [],
-                "order_result": None,
-                "reply":        "",
+                "user_message":   req.message,
+                "session_id":     req.session_id,
+                "history":        history,
+                "intent":         "",
+                "context":        "",
+                "chunks":         [],
+                "order_result":   None,
+                "reply":          "",
+                # Phase 5 upsell fields — must be present in state or LangGraph
+                # raises a KeyError when the respond_node accesses them.
+                "upsell_done":    False,
+                "upsell_product": None,
             }
         )
     except Exception:

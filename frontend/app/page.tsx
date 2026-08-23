@@ -21,8 +21,8 @@ const FEATURES = [
     icon: <MicrophoneStage size={22} weight="duotone" />,
     title: "Voice-First Interface",
     description:
-      "Speak naturally; the agent answers within 500ms via Deepgram STT and streaming TTS — with barge-in mid-response.",
-    tag: "DEEPGRAM + CARTESIA",
+      "Speak naturally; the agent answers within 500ms via Groq Whisper STT and streaming TTS — with barge-in mid-response.",
+    tag: "GROQ STT + TTS",
   },
   {
     icon: <MagnifyingGlass size={22} weight="duotone" />,
@@ -56,14 +56,14 @@ const STATS = [
 
 const PIPELINE = [
   { step: "01", label: "You speak", note: "WebRTC + VAD" },
-  { step: "02", label: "We transcribe", note: "Deepgram STT" },
+  { step: "02", label: "We transcribe", note: "Groq Whisper STT" },
   { step: "03", label: "Agent reasons", note: "LangGraph + RAG" },
-  { step: "04", label: "Agent answers", note: "Streaming TTS" },
+  { step: "04", label: "Agent answers", note: "Groq PlayAI TTS" },
 ];
 
 const TICKER = [
-  "Deepgram STT",
-  "Cartesia TTS",
+  "Groq Whisper STT",
+  "Groq PlayAI TTS",
   "Qdrant Vectors",
   "LangGraph Agent",
   "Pipecat Pipeline",
