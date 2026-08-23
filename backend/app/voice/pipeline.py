@@ -163,9 +163,16 @@ async def build_and_run_pipeline(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,    # barge-in enabled
+            allow_interruptions=True,          # barge-in enabled
             enable_metrics=True,
             enable_usage_metrics=True,
+            # Groq TTS (PlayAI / Orpheus) outputs a fixed 48 kHz stream.
+            # Daily's default output is 16 kHz — the mismatch causes the
+            # bot to join the room but produce no audible speech (frames
+            # are resampled to silence or dropped entirely).
+            audio_out_sample_rate=48000,
+            # Silero VAD and Groq Whisper STT both work best at 16 kHz.
+            audio_in_sample_rate=16000,
         ),
     )
 

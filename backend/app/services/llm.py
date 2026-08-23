@@ -38,23 +38,38 @@ def get_llm_router():
                     # is Groq's recommended replacement.
                     "model": "groq/openai/gpt-oss-120b",
                     "api_key": settings.groq_api_key,
-                    "timeout": 5,
+                    # 15s — order extraction prompts can take 8-12s on busy
+                    # Groq free-tier; 5s caused silent cascade failures.
+                    "timeout": 15,
                 },
             }
         )
 
     if settings.openai_api_key and settings.openai_base_url:
-        model_list.append(
-            {
-                "model_name": "fallback-openai",
-                "litellm_params": {
-                    "model": f"openai/{settings.openai_model_name or 'gpt-4o-mini'}",
-                    "api_key": settings.openai_api_key,
-                    "api_base": settings.openai_base_url,
-                    "timeout": 10,
-                },
-            }
-        )
+        # Skip localhost proxies — they won't be running on the production
+        # server and would immediately fail rather than acting as a real
+        # fallback (the connection-refused error looks identical to an API
+        # error and just slows down the cascade).
+        _base = settings.openai_base_url.lower()
+        _is_local = any(h in _base for h in ("127.0.0.1", "localhost", "0.0.0.0"))
+        if not _is_local:
+            model_list.append(
+                {
+                    "model_name": "fallback-openai",
+                    "litellm_params": {
+                        "model": f"openai/{settings.openai_model_name or 'gpt-4o-mini'}",
+                        "api_key": settings.openai_api_key,
+                        "api_base": settings.openai_base_url,
+                        "timeout": 10,
+                    },
+                }
+            )
+        else:
+            logger.info(
+                "Skipping OpenAI fallback — base URL is localhost (%s). "
+                "Start the local proxy if you want it active during development.",
+                settings.openai_base_url,
+            )
 
     if settings.gemini_api_key:
         model_list.append(

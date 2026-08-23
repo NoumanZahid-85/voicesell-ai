@@ -59,7 +59,10 @@ _FALLBACK_PHRASE = (
     "I'm sorry, I ran into a bit of trouble there. "
     "Could you say that again?"
 )
-_AGENT_TIMEOUT_S = 8.0  # seconds before we give up and apologise
+# 25s: Groq free-tier LLM calls take up to 15s + RAG retrieval overhead.
+# The old 8s value was shorter than Groq's own timeout, so any order
+# would reliably fail in voice mode before the model even responded.
+_AGENT_TIMEOUT_S = 25.0
 
 
 class LangGraphProcessor(FrameProcessor):
