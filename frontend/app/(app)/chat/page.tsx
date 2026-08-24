@@ -115,6 +115,7 @@ export default function ChatPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const callRef = useRef<any>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -196,10 +197,15 @@ export default function ChatPage() {
 
       // Fail fast with a clear message if the mic is blocked/missing,
       // instead of letting Daily's join() hang waiting on a permission
-      // prompt the user can't see or already dismissed.
+      // prompt the user can't see or already dismissed. The SAME stream is
+      // then handed to the call object — letting daily-js re-acquire the
+      // device internally produced live-but-silent tracks in headless mode.
+      let micStream: MediaStream;
       try {
-        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        micStream.getTracks().forEach((t) => t.stop());
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+        micStreamRef.current = micStream;
       } catch {
         throw new Error(
           "Microphone access was blocked. Please allow microphone permission for this site and try again."
@@ -210,16 +216,11 @@ export default function ChatPage() {
       setRoomUrl(data.room_url);
       setVoiceSessionId(data.session_id);
 
-      // Headless call object (no visible Daily UI) — this is what actually
-      // requests mic permission and publishes audio. The earlier hidden
-      // 1x1 iframe pointed at Daily's *prebuilt* room, which requires a
-      // visible "join" click to ever start streaming mic audio; since the
-      // iframe was invisible, that click could never happen and the
-      // agent never received any audio.
       const DailyMod = await import("@daily-co/daily-js");
       const Daily = DailyMod.default;
+      const micTrack = micStream.getAudioTracks()[0];
       const call = Daily.createCallObject({
-        audioSource: true,
+        audioSource: micTrack,
         videoSource: false,
       });
       callRef.current = call;
@@ -321,6 +322,8 @@ export default function ChatPage() {
       }
       releaseRemoteAudioEl(audioElRef.current);
       audioElRef.current = null;
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
     }
   }, []);
 
@@ -336,6 +339,8 @@ export default function ChatPage() {
     }
     releaseRemoteAudioEl(audioElRef.current);
     audioElRef.current = null;
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current = null;
     if (voiceSessionId) {
       try {
         await api.voice.disconnect(voiceSessionId);
@@ -356,6 +361,8 @@ export default function ChatPage() {
       callRef.current?.destroy?.();
       releaseRemoteAudioEl(audioElRef.current);
       audioElRef.current = null;
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
     };
   }, []);
 

@@ -204,9 +204,27 @@ class VoiceEventProbe(FrameProcessor):
                         self._sid, "input_audio", "first frame received"
                     )
                 elif self._in_count % 250 == 0:
-                    session_registry.record_event(
-                        self._sid, "input_audio", f"{self._in_count} frames"
-                    )
+                    # RMS (0-1 scale) proves whether the track carries real
+                    # sound or is a silent placeholder.
+                    try:
+                        import array as _array
+                        import math as _math
+
+                        samples = _array.array("h", frame.audio[:19200])
+                        rms = (
+                            _math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768.0
+                            if samples
+                            else 0.0
+                        )
+                        session_registry.record_event(
+                            self._sid,
+                            "input_audio",
+                            f"{self._in_count} frames rms={rms:.4f} sr={frame.sample_rate}",
+                        )
+                    except Exception:  # noqa: BLE001
+                        session_registry.record_event(
+                            self._sid, "input_audio", f"{self._in_count} frames"
+                        )
             elif isinstance(frame, UserStartedSpeakingFrame):
                 session_registry.record_event(self._sid, "vad_user_speaking")
             elif isinstance(frame, TranscriptionFrame):
@@ -338,14 +356,16 @@ async def build_and_run_pipeline(
         logger.info("Participant joined session=%s id=%s", session_id, participant.get("id"))
         from app.voice import session_registry
         session_registry.record_event(session_id, "participant_joined")
-        # Publish-side visibility: if the browser never published mic audio,
-        # the audio track's state here will not be "playable".
+        # Publish-side visibility: dump the raw tracks dict so a silent or
+        # missing mic track is visible verbatim.
         try:
-            audio_state = str(
-                (participant.get("tracks") or {}).get("audio", {}).get("state", "absent")
-            )
+            import json as _json
+
+            raw_tracks = participant.get("tracks")
             session_registry.record_event(
-                session_id, "participant_tracks", f"audio={audio_state}"
+                session_id,
+                "participant_tracks",
+                _json.dumps(raw_tracks)[:150] if raw_tracks else "no-tracks-key",
             )
         except Exception:  # noqa: BLE001 — diagnostics must never break the call
             pass
