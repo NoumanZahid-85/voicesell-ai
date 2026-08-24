@@ -208,6 +208,16 @@ export default function ChatPage() {
     } catch {
       audioCtx = new AudioContext();
     }
+    // Chrome starts a fresh AudioContext "suspended" under autoplay policy —
+    // while suspended, onaudioprocess never fires (mic dead) and buffers
+    // never play. The Connect click is the user gesture that unlocks it.
+    if (audioCtx.state === "suspended") {
+      try {
+        await audioCtx.resume();
+      } catch {
+        /* older browser — proceed anyway */
+      }
+    }
     audioCtxRef.current = audioCtx;
 
     const wsSessionId = `${sessionId}-${Date.now().toString(36)}`;

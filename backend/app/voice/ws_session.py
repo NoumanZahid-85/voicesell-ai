@@ -364,10 +364,13 @@ class VoiceWSSession:
                         ),
                         timeout=TTS_TIMEOUT_S,
                     )
-                    slots[i].set_result(await resp.aread())
+                    # .content is the buffered bytes on the SDK's binary
+                    # response wrapper — always available (unlike aread).
+                    slots[i].set_result(resp.content)
                     session_registry.record_event(self.session_id, "tts_chunk", f"{i}:{len(chunk)}c")
                 except Exception as exc:  # noqa: BLE001
                     logger.error("TTS chunk %s failed: %s", i, exc)
+                    session_registry.record_event(self.session_id, "tts_fail", f"{i}:{str(exc)[:110]}")
                     slots[i].set_result(None)
 
         for i, chunk in enumerate(chunks):
@@ -376,6 +379,7 @@ class VoiceWSSession:
         self.speaking = True
         await self._send_json({"type": "speaking_start"})
 
+        sent = 0
         for i, chunk in enumerate(chunks):
             wav = await slots[i]
             if wav is None:
@@ -383,6 +387,15 @@ class VoiceWSSession:
             await self._send_json({"type": "agent_caption", "text": _clean_caption(chunk)})
             await self.ws.send_bytes(wav)
             session_registry.record_event(self.session_id, "audio_sent", str(i))
+            sent += 1
+
+        if sent == 0:
+            # Nothing made it out — release the turn instead of latching
+            # half-duplex mode shut until the watchdog fires.
+            self.speaking = False
+            self.busy = False
+            await self._send_json({"type": "error", "message": "Speech synthesis failed — please try again."})
+            return
 
         # Failsafe: if the tab died before playback_done, unblock the mic.
         async def watchdog() -> None:
