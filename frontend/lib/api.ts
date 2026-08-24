@@ -130,6 +130,10 @@ export const api = {
     disconnect: (sessionId: string) =>
       send(`/api/v1/voice/connect/${sessionId}`, { method: "DELETE" }),
     sessions: () => fetchJSON<VoiceSession[]>("/api/v1/voice/sessions"),
+    wsUrl: (sessionId: string) => {
+      const wsBase = BACKEND.replace(/^http/, "ws");
+      return `${wsBase}/api/v1/voice/ws?session_id=${encodeURIComponent(sessionId)}`;
+    },
   },
 };
 

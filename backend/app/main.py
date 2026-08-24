@@ -22,6 +22,7 @@ from app.api.health import router as health_router
 from app.api.orders import router as orders_router
 from app.api.products import router as products_router
 from app.api.voice import router as voice_router
+from app.api.voice_ws import router as voice_ws_router
 from app.bootstrap import auto_seed, ensure_schema, ensure_vector_store, shutdown, warm_embeddings
 from app.core.config import get_settings
 
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(orders_router)
     app.include_router(voice_router)
+    app.include_router(voice_ws_router)
     app.include_router(products_router)
 
     # ── Static test page (dev only) ──────────────────────────────────

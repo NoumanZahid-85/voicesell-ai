@@ -14,7 +14,6 @@ import {
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import type { ChatSource } from "@/lib/types";
-import type { DailyEventObjectTrack } from "@daily-co/daily-js";
 import { PageHeader } from "@/app/components/ui";
 import { formatCurrency, formatTime } from "@/lib/format";
 
@@ -51,29 +50,28 @@ function useSessionId() {
 
 const VOICE_LABEL: Record<VoiceState, string> = {
   idle: "Standby — ready to connect",
-  connecting: "Provisioning WebRTC room…",
+  connecting: "Opening voice channel…",
   listening: "Live — agent is listening",
   error: "Voice pipeline unavailable",
 };
 
-function mountRemoteAudioEl(): HTMLAudioElement {
-  const el = document.createElement("audio");
-  el.autoplay = true;
-  el.setAttribute("playsinline", "true");
-  el.style.display = "none";
-  document.body.appendChild(el);
-  return el;
-}
+// ── WebSocket voice helpers ────────────────────────────────────────────
+// The browser streams PCM16 mono @16 kHz over a WebSocket; the backend runs
+// Silero VAD → Whisper → LangGraph → Orpheus and returns complete WAV files,
+// one per TTS chunk, which we decode and play back strictly in order.
+//
+// Turn-taking is half-duplex: the moment the server announces
+// "speaking_start" we stop streaming mic audio (gate closes) so speaker
+// leakage can never be transcribed as user input. When our local playback
+// queue drains we send "playback_done" and the gate reopens.
 
-function releaseRemoteAudioEl(el: HTMLAudioElement | null) {
-  if (!el) return;
-  try {
-    el.pause();
-    el.srcObject = null;
-    el.remove();
-  } catch {
-    /* best-effort */
+function floatToInt16(input: Float32Array): Int16Array {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
+  return out;
 }
 
 export default function ChatPage() {
@@ -105,17 +103,25 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
-  const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const [voiceSessionId, setVoiceSessionId] = useState<string | null>(null);
   const [connError, setConnError] = useState<string | null>(null);
   const [caption, setCaption] = useState<Caption | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const callRef = useRef<any>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  // Audio playback queue: decoded WAV buffers awaiting sequential play.
+  const playQueueRef = useRef<AudioBuffer[]>([]);
+  const playingRef = useRef(false);
+  // True while CALLIOPE has the floor — mic streaming is suppressed.
+  const gateRef = useRef(false);
+  // Mirror of voiceState usable inside stable callbacks/event handlers.
+  const voiceStateRef = useRef<VoiceState>("idle");
+  useEffect(() => {
+    voiceStateRef.current = voiceState;
+  }, [voiceState]);
 
   // Auto-scroll
   useEffect(() => {
@@ -175,194 +181,189 @@ export default function ChatPage() {
     }
   };
 
-  // ── Voice session ──────────────────────────────────────────────────
+  // ── Voice session (pure WebSocket, no Daily/WebRTC) ─────────────────
   const startVoice = useCallback(async () => {
     setVoiceState("connecting");
     setConnError(null);
     setCaption(null);
+
+    // Fail fast with a clear message if the mic is blocked or missing.
+    let micStream: MediaStream;
     try {
-      // Daily only allows one call-object instance per page. If a previous
-      // session's cleanup didn't run (e.g. the user navigated away mid-call),
-      // creating a new one throws "Duplicate DailyIframe instances are not
-      // allowed" — destroy any leftover first.
-      if (callRef.current) {
-        try {
-          await callRef.current.leave();
-          callRef.current.destroy();
-        } catch {
-          /* best-effort */
-        }
-        callRef.current = null;
-      }
-
-      // Fail fast with a clear message if the mic is blocked/missing,
-      // instead of letting Daily's join() hang waiting on a permission
-      // prompt the user can't see or already dismissed. The SAME stream is
-      // then handed to the call object — letting daily-js re-acquire the
-      // device internally produced live-but-silent tracks in headless mode.
-      let micStream: MediaStream;
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-        micStreamRef.current = micStream;
-      } catch {
-        throw new Error(
-          "Microphone access was blocked. Please allow microphone permission for this site and try again."
-        );
-      }
-
-      const data = await api.voice.connect();
-      setRoomUrl(data.room_url);
-      setVoiceSessionId(data.session_id);
-
-      const DailyMod = await import("@daily-co/daily-js");
-      const Daily = DailyMod.default;
-      const micTrack = micStream.getAudioTracks()[0];
-      const call = Daily.createCallObject({
-        audioSource: micTrack,
-        videoSource: false,
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      callRef.current = call;
+    } catch {
+      setVoiceState("error");
+      setConnError(
+        "Microphone access was blocked. Please allow microphone permission for this site and try again."
+      );
+      return;
+    }
+    micStreamRef.current = micStream;
 
-      // A headless call object receives the bot's voice as raw WebRTC tracks
-      // but NEVER plays them — there is no prebuilt UI to do it for us. Route
-      // every remote audio track into one hidden <audio> element. Chrome
-      // permits unmuted autoplay because mic permission was just granted.
-      audioElRef.current = mountRemoteAudioEl();
-      const audioEl = audioElRef.current;
+    let audioCtx: AudioContext;
+    try {
+      audioCtx = new AudioContext({ sampleRate: 16000 });
+    } catch {
+      audioCtx = new AudioContext();
+    }
+    audioCtxRef.current = audioCtx;
 
-      const attachRemoteAudio = (track?: MediaStreamTrack | null) => {
-        if (!track || track.kind !== "audio") return;
-        const stream = (audioEl.srcObject as MediaStream | null) ?? new MediaStream();
-        if (!stream.getTracks().some((t) => t.id === track.id)) {
-          stream.addTrack(track);
-          audioEl.srcObject = stream;
+    const wsSessionId = `${sessionId}-${Date.now().toString(36)}`;
+    const ws = new WebSocket(api.voice.wsUrl(wsSessionId));
+    ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
+    setVoiceSessionId(wsSessionId);
+
+    // ── Playback queue: decode WAV chunks and play strictly in order ──
+    const pump = () => {
+      if (playingRef.current) return;
+      const next = playQueueRef.current.shift();
+      if (!next) {
+        // Queue drained — release the mic gate back to the user.
+        gateRef.current = false;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "playback_done" }));
         }
-        audioEl.play().catch(() => {});
+        return;
+      }
+      playingRef.current = true;
+      const src = audioCtx.createBufferSource();
+      src.buffer = next;
+      src.onended = () => {
+        playingRef.current = false;
+        pump();
       };
+      src.connect(audioCtx.destination);
+      src.start();
+    };
 
-      call.on("track-started", (ev: DailyEventObjectTrack) => {
-        if (ev.participant?.local) return;
-        attachRemoteAudio(ev.track);
-      });
-
-      call.on("app-message", (ev: { data?: Caption }) => {
-        if (ev?.data?.role && typeof ev.data.text === "string") {
-          if (ev.data.role === "user") {
-            setCaption({ role: "user", text: ev.data.text });
-          } else {
-            // Agent replies stream in sentence-by-sentence — append so the
-            // caption grows the way subtitles do, rather than replacing.
+    ws.onmessage = async (ev: MessageEvent<string | ArrayBuffer>) => {
+      if (typeof ev.data === "string") {
+        try {
+          const msg = JSON.parse(ev.data) as { type?: string; text?: string; message?: string };
+          if (msg.type === "transcript" && msg.text) {
+            setCaption({ role: "user", text: msg.text });
+          } else if (msg.type === "agent_caption" && msg.text) {
             setCaption((prev) =>
               prev?.role === "agent"
-                ? { role: "agent", text: `${prev.text} ${ev.data!.text}`.trim() }
-                : { role: "agent", text: ev.data!.text }
+                ? { role: "agent", text: `${prev.text} ${msg.text}`.trim() }
+                : { role: "agent", text: msg.text ?? "" }
             );
+          } else if (msg.type === "speaking_start") {
+            gateRef.current = true;
+            playQueueRef.current = [];
+            playingRef.current = false;
+          } else if (msg.type === "error" && msg.message) {
+            setConnError(msg.message);
           }
+        } catch {
+          /* malformed control frame — ignore */
         }
-      });
-
-      call.on("left-meeting", () => {
-        setVoiceState((s) => (s === "listening" ? "idle" : s));
-      });
-
-      call.on("error", (ev: { errorMsg?: string }) => {
-        setVoiceState("error");
-        setConnError(ev?.errorMsg || "Voice call encountered an error.");
-      });
-
-      // Never let "connecting" hang forever — a stuck WebRTC handshake
-      // should surface a clear, retryable error instead of a silent spinner.
-      const joinTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Connection timed out. Please try again.")), 15000)
-      );
-      await Promise.race([call.join({ url: data.room_url }), joinTimeout]);
-
-      // Belt-and-braces: attach any remote audio tracks that became playable
-      // before our track-started listener was registered or between events.
-      const parts = call.participants() as Record<
-        string,
-        {
-          local?: boolean;
-          tracks?: {
-            audio?: {
-              track?: MediaStreamTrack | null;
-              persistentTrack?: MediaStreamTrack | null;
-            };
-          };
-        }
-      >;
-      for (const p of Object.values(parts)) {
-        if (p?.local) continue;
-        const t = p?.tracks?.audio?.track ?? p?.tracks?.audio?.persistentTrack ?? null;
-        if (t) attachRemoteAudio(t);
+        return;
       }
+      // Binary frame = one complete WAV from the TTS queue.
+      try {
+        const buffer = await audioCtx.decodeAudioData(ev.data.slice(0));
+        playQueueRef.current.push(buffer);
+        pump();
+      } catch {
+        /* undecodable chunk — skip it rather than stall the queue */
+      }
+    };
 
-      setVoiceState("listening");
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          role: "agent",
-          text: "Voice session active. Speak naturally — I'm listening.",
-          ts: new Date(),
-        },
-      ]);
-    } catch (err: unknown) {
+    ws.onerror = () => {
+      if (voiceStateRef.current !== "idle") {
+        setVoiceState("error");
+        setConnError("Voice connection failed. Please try again.");
+      }
+    };
+    ws.onclose = () => {
+      setVoiceState((s) => (s === "listening" || s === "connecting" ? "idle" : s));
+    };
+
+    // ── Mic capture: ScriptProcessor → PCM16 → WS binary frames ──────
+    const sourceNode = audioCtx.createMediaStreamSource(micStream);
+    const processor = audioCtx.createScriptProcessor(2048, 1, 1);
+    const muteGain = audioCtx.createGain();
+    muteGain.gain.value = 0; // processor must reach destination to run, silently
+    processor.onaudioprocess = (e) => {
+      if (gateRef.current || ws.readyState !== WebSocket.OPEN) return;
+      const pcm = floatToInt16(e.inputBuffer.getChannelData(0));
+      ws.send(pcm.buffer as ArrayBuffer);
+    };
+    sourceNode.connect(processor);
+    processor.connect(muteGain);
+    muteGain.connect(audioCtx.destination);
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Connection timed out. Please try again.")), 15000);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    }).catch((err: unknown) => {
       setVoiceState("error");
       setConnError(err instanceof Error ? err.message : String(err));
-      if (callRef.current) {
-        try {
-          callRef.current.destroy();
-        } catch {
-          /* best-effort */
-        }
-        callRef.current = null;
-      }
-      releaseRemoteAudioEl(audioElRef.current);
-      audioElRef.current = null;
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      ws.close();
+      audioCtx.close().catch(() => {});
+      micStream.getTracks().forEach((t) => t.stop());
+      wsRef.current = null;
+      audioCtxRef.current = null;
       micStreamRef.current = null;
-    }
-  }, []);
+      return;
+    });
+    if (wsRef.current === null) return; // failed connect above already cleaned up
+
+    setVoiceState("listening");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: "agent",
+        text: "Voice session active. Speak naturally — pause a second when you're done, and let me finish before your next question.",
+        ts: new Date(),
+      },
+    ]);
+  }, [sessionId]);
 
   const stopVoice = useCallback(async () => {
-    if (callRef.current) {
-      try {
-        await callRef.current.leave();
-        callRef.current.destroy();
-      } catch {
-        /* best-effort */
-      }
-      callRef.current = null;
+    try {
+      wsRef.current?.close();
+    } catch {
+      /* best-effort */
     }
-    releaseRemoteAudioEl(audioElRef.current);
-    audioElRef.current = null;
+    wsRef.current = null;
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
-    if (voiceSessionId) {
-      try {
-        await api.voice.disconnect(voiceSessionId);
-      } catch {
-        /* best-effort */
-      }
+    try {
+      await audioCtxRef.current?.close();
+    } catch {
+      /* best-effort */
     }
+    audioCtxRef.current = null;
+    playQueueRef.current = [];
+    playingRef.current = false;
+    gateRef.current = false;
+    // Closing the socket is the disconnect — the backend records
+    // "ws_disconnected" from the receive loop's finally block.
     setVoiceState("idle");
-    setRoomUrl(null);
     setVoiceSessionId(null);
     setConnError(null);
     setCaption(null);
-  }, [voiceSessionId]);
+  }, []);
 
-  // Clean up the call object if the component unmounts mid-session.
+  // Clean up sockets/audio if the component unmounts mid-session.
   useEffect(() => {
     return () => {
-      callRef.current?.destroy?.();
-      releaseRemoteAudioEl(audioElRef.current);
-      audioElRef.current = null;
+      try {
+        wsRef.current?.close();
+      } catch {
+        /* best-effort */
+      }
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
+      audioCtxRef.current?.close().catch(() => {});
     };
   }, []);
 
@@ -513,11 +514,6 @@ export default function ChatPage() {
                   >
                     {VOICE_LABEL[voiceState]}
                   </div>
-                  {roomUrl && (
-                    <div className="mono-id" style={{ fontSize: "0.64rem", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {roomUrl.replace("https://", "")}
-                    </div>
-                  )}
                   {connError && (
                     <div style={{ fontSize: "0.74rem", color: "var(--danger)", maxWidth: 420, marginTop: 3, lineHeight: 1.5 }}>
                       {connError}
