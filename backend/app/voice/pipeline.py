@@ -54,11 +54,12 @@ try:
         InputAudioRawFrame,
         TextFrame,
         TranscriptionFrame,
-        UserStartedSpeakingFrame,
+        VADUserStartedSpeakingFrame,
     )
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineParams, PipelineTask
+    from pipecat.processors.audio.vad_processor import VADProcessor
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.services.groq.stt import GroqSTTService
     from pipecat.services.groq.tts import GroqTTSService
@@ -75,11 +76,12 @@ except ImportError as e:
     # Define simple dummy classes so uvicorn compiles
     class SileroVADAnalyzer: pass
     class VADParams: pass
+    class VADProcessor: pass
     class ErrorFrame: pass
     class InputAudioRawFrame: pass
     class TextFrame: pass
     class TranscriptionFrame: pass
-    class UserStartedSpeakingFrame: pass
+    class VADUserStartedSpeakingFrame: pass
     class Pipeline: pass
     class PipelineRunner: pass
     class PipelineParams: pass
@@ -225,7 +227,7 @@ class VoiceEventProbe(FrameProcessor):
                         session_registry.record_event(
                             self._sid, "input_audio", f"{self._in_count} frames"
                         )
-            elif isinstance(frame, UserStartedSpeakingFrame):
+            elif isinstance(frame, VADUserStartedSpeakingFrame):
                 session_registry.record_event(self._sid, "vad_user_speaking")
             elif isinstance(frame, TranscriptionFrame):
                 session_registry.record_event(self._sid, "transcript", frame.text[:70])
@@ -270,20 +272,27 @@ async def build_and_run_pipeline(
             audio_out_enabled=True,
             camera_out_enabled=False,
             transcription_enabled=False,   # Groq handles STT, not Daily
-            vad_enabled=True,
-            # pipecat 1.7.0 defaults min_volume=0.6 (RMS 0-1 scale) — normal
-            # speech is RMS ~0.05-0.25, so the stock gate vetoes EVERY frame
-            # and the bot never hears anything (zero UserStartedSpeakingFrame).
-            vad_analyzer=SileroVADAnalyzer(
-                params=VADParams(
-                    confidence=0.55,
-                    start_secs=0.2,
-                    stop_secs=0.4,
-                    min_volume=0.005,
-                )
-            ),
-            vad_audio_passthrough=True,
+            # NOTE: pipecat 1.x removed vad_enabled/vad_analyzer from transport
+            # params — pydantic silently ignores unknown kwargs, so configuring
+            # VAD here does NOTHING. VAD now runs as a pipeline processor (see
+            # VADProcessor below).
         ),
+    )
+
+    # ── Voice activity detection ─────────────────────────────────────
+    # In pipecat 1.x, VAD is a standalone pipeline processor that emits
+    # VADUserStarted/StoppedSpeakingFrame — exactly what SegmentedSTTService
+    # (GroqSTTService) gates its utterance transcription on. min_volume must
+    # be far below the old 0.6 default: speech RMS is typically 0.05-0.25.
+    vad = VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(
+            params=VADParams(
+                confidence=0.55,
+                start_secs=0.2,
+                stop_secs=0.4,
+                min_volume=0.005,
+            )
+        )
     )
 
     # ── Groq STT — Whisper large-v3-turbo ────────────────────────────
@@ -323,6 +332,7 @@ async def build_and_run_pipeline(
         [
             transport.input(),
             probe,
+            vad,
             stt,
             agent,
             tts,
@@ -348,7 +358,7 @@ async def build_and_run_pipeline(
     # Build fingerprint — appears in /voice/events so we always know WHICH
     # build served a session ("started" alone doesn't tell us).
     from app.voice import session_registry as _reg0
-    _reg0.record_event(session_id, "pipeline_ready", "robust-tts-v2+probe")
+    _reg0.record_event(session_id, "pipeline_ready", "v3-pipeline-vadproc")
 
     # ── Event: first participant joins ────────────────────────────────
     @transport.event_handler("on_first_participant_joined")
