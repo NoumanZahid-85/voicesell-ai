@@ -364,9 +364,10 @@ class VoiceWSSession:
                         ),
                         timeout=TTS_TIMEOUT_S,
                     )
-                    # .content is the buffered bytes on the SDK's binary
-                    # response wrapper — always available (unlike aread).
-                    slots[i].set_result(resp.content)
+                    # AsyncBinaryAPIResponse exposes read() (verified against
+                    # groq 1.6.0 source AND a live round-trip call) — not
+                    # .content / .aread().
+                    slots[i].set_result(await resp.read())
                     session_registry.record_event(self.session_id, "tts_chunk", f"{i}:{len(chunk)}c")
                 except Exception as exc:  # noqa: BLE001
                     logger.error("TTS chunk %s failed: %s", i, exc)
