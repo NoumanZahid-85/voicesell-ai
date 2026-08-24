@@ -183,6 +183,13 @@ class VoiceWSSession:
         self._silence_s = 0.0
         self._captured_s = 0.0
 
+        # Telemetry: what does Silero actually see while idle? Recorded as a
+        # vad_probe event every PROBE_INTERVAL_S so a dead-mic or low-level
+        # audio problem is visible in /voice/events without guessing.
+        self._probe_t0 = time.monotonic()
+        self._probe_bytes = 0
+        self._probe_max_conf = 0.0
+
     # ── Lifecycle ──────────────────────────────────────────────────────
     async def run(self) -> None:
         session_registry.record_event(self.session_id, "ws_connected")
@@ -223,6 +230,18 @@ class VoiceWSSession:
         confidence = self.vad.feed(pcm16)
         if confidence is None:
             return
+
+        self._probe_bytes += len(pcm16)
+        self._probe_max_conf = max(self._probe_max_conf, confidence)
+        if time.monotonic() - self._probe_t0 >= 2.0:
+            session_registry.record_event(
+                self.session_id,
+                "vad_probe",
+                f"conf={self._probe_max_conf:.2f} kb={self._probe_bytes // 1024}",
+            )
+            self._probe_t0 = time.monotonic()
+            self._probe_bytes = 0
+            self._probe_max_conf = 0.0
 
         if self._state == "idle":
             self._preroll.append(pcm16)

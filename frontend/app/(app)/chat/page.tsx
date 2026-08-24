@@ -74,6 +74,22 @@ function floatToInt16(input: Float32Array): Int16Array {
   return out;
 }
 
+function resampleTo16k(input: Float32Array, fromRate: number): Float32Array {
+  const ratio = fromRate / 16000;
+  if (Math.abs(ratio - 1) < 0.001) return input;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const a = input[idx] ?? 0;
+    const b = input[idx + 1] ?? a;
+    out[i] = a + (b - a) * frac;
+  }
+  return out;
+}
+
 export default function ChatPage() {
   const sessionId = useSessionId();
   const [mode, setMode] = useState<Mode>("text");
@@ -122,6 +138,9 @@ export default function ChatPage() {
   useEffect(() => {
     voiceStateRef.current = voiceState;
   }, [voiceState]);
+  const [micPackets, setMicPackets] = useState(0);
+  const [micCtxRate, setMicCtxRate] = useState(0);
+  const micWatchRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -204,9 +223,15 @@ export default function ChatPage() {
 
     let audioCtx: AudioContext;
     try {
-      audioCtx = new AudioContext({ sampleRate: 16000 });
-    } catch {
+      // Default device rate (usually 48 kHz) — custom-rate contexts have
+      // flaky MediaStreamSource resampling in several Chrome builds. We
+      // resample to 16 kHz ourselves before sending.
       audioCtx = new AudioContext();
+    } catch {
+      setVoiceState("error");
+      setConnError("Web Audio is not available in this browser.");
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      return;
     }
     // Chrome starts a fresh AudioContext "suspended" under autoplay policy —
     // while suspended, onaudioprocess never fires (mic dead) and buffers
@@ -263,6 +288,7 @@ export default function ChatPage() {
             );
           } else if (msg.type === "speaking_start") {
             gateRef.current = true;
+            gateOpenedAt = Date.now();
             playQueueRef.current = [];
             playingRef.current = false;
           } else if (msg.type === "error" && msg.message) {
@@ -293,19 +319,40 @@ export default function ChatPage() {
       setVoiceState((s) => (s === "listening" || s === "connecting" ? "idle" : s));
     };
 
-    // ── Mic capture: ScriptProcessor → PCM16 → WS binary frames ──────
+    // ── Mic capture: ScriptProcessor → resample 16k → PCM16 → WS ─────
     const sourceNode = audioCtx.createMediaStreamSource(micStream);
-    const processor = audioCtx.createScriptProcessor(2048, 1, 1);
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
     const muteGain = audioCtx.createGain();
     muteGain.gain.value = 0; // processor must reach destination to run, silently
+    let packetsSent = 0;
+    let lastAudioAt = Date.now();
     processor.onaudioprocess = (e) => {
+      lastAudioAt = Date.now();
       if (gateRef.current || ws.readyState !== WebSocket.OPEN) return;
-      const pcm = floatToInt16(e.inputBuffer.getChannelData(0));
-      ws.send(pcm.buffer as ArrayBuffer);
+      const pcm16k = resampleTo16k(e.inputBuffer.getChannelData(0), audioCtx.sampleRate);
+      ws.send(floatToInt16(pcm16k).buffer as ArrayBuffer);
+      packetsSent++;
+      if (packetsSent % 8 === 1) setMicPackets(packetsSent); // throttle re-renders
     };
     sourceNode.connect(processor);
     processor.connect(muteGain);
     muteGain.connect(audioCtx.destination);
+    setMicCtxRate(audioCtx.sampleRate);
+
+    // Safety: if the gate ever sticks shut (missed onended, stalled queue)
+    // force it open again so the mic never stays muted forever.
+    let gateOpenedAt = Date.now();
+    const gateWatchdog = setInterval(() => {
+      if (gateRef.current && Date.now() - gateOpenedAt > 15000) {
+        gateRef.current = false;
+        playQueueRef.current = [];
+        playingRef.current = false;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "playback_done" }));
+        }
+      }
+    }, 3000);
+    micWatchRef.current = gateWatchdog;
 
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Connection timed out. Please try again.")), 15000);
@@ -345,6 +392,10 @@ export default function ChatPage() {
       /* best-effort */
     }
     wsRef.current = null;
+    if (micWatchRef.current) {
+      clearInterval(micWatchRef.current);
+      micWatchRef.current = null;
+    }
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current = null;
     try {
@@ -372,6 +423,7 @@ export default function ChatPage() {
       } catch {
         /* best-effort */
       }
+      if (micWatchRef.current) clearInterval(micWatchRef.current);
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       audioCtxRef.current?.close().catch(() => {});
     };
@@ -524,6 +576,12 @@ export default function ChatPage() {
                   >
                     {VOICE_LABEL[voiceState]}
                   </div>
+                  {voiceState === "listening" && (
+                    <div className="mono-id" style={{ fontSize: "0.62rem", opacity: 0.75 }}>
+                      MIC {micPackets} PKTS · CTX {micCtxRate}Hz
+                      {gateRef.current ? " · BOT SPEAKING" : " · LISTENING"}
+                    </div>
+                  )}
                   {connError && (
                     <div style={{ fontSize: "0.74rem", color: "var(--danger)", maxWidth: 420, marginTop: 3, lineHeight: 1.5 }}>
                       {connError}
