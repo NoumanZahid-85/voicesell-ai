@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   createContext,
@@ -252,53 +252,49 @@ function LoginScreen() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: 20,
-        background:
-          "radial-gradient(1200px 600px at 70% -10%, var(--signal-soft), transparent), #f6f6f4",
+        background: "var(--ink-0)",
+        position: "relative",
+        zIndex: 1,
       }}
     >
       <div
-        style={{
-          width: "100%",
-          maxWidth: 400,
-          background: "#fff",
-          border: "1px solid var(--line)",
-          borderRadius: 16,
-          padding: "28px 26px",
-          boxShadow: "0 18px 50px rgba(22,23,27,0.08)",
-        }}
+        className="panel"
+        style={{ width: "100%", maxWidth: 400, padding: "30px 28px", zIndex: 1 }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
           <Waveform size={24} color="var(--signal)" weight="fill" />
-          <strong style={{ fontSize: 17, letterSpacing: "0.06em" }}>CALLIOPE</strong>
+          <strong
+            style={{
+              fontSize: 17,
+              letterSpacing: "0.08em",
+              color: "var(--text-hi)",
+            }}
+          >
+            CALLIOPE
+          </strong>
         </div>
-        <p style={{ color: "var(--text-mid)", fontSize: 13, marginBottom: 18 }}>
-          Sign in to keep your orders private to your account.
+        <p style={{ color: "var(--text-mid)", fontSize: 13.5, marginBottom: 18, lineHeight: 1.5 }}>
+          Sign in so your orders stay private to your account.
         </p>
 
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        <div role="tablist" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {(["signin", "signup"] as const).map((m) => (
             <button
               key={m}
+              type="button"
+              className="pill"
+              aria-pressed={mode === m}
               onClick={() => {
                 setMode(m);
                 setError(null);
                 setNotice(null);
               }}
-              style={{
-                flex: 1,
-                padding: "8px 0",
-                fontSize: 13,
-                borderRadius: 8,
-                border: "1px solid var(--line)",
-                cursor: "pointer",
-                background: mode === m ? "var(--signal-soft-2)" : "#fff",
-                fontWeight: mode === m ? 600 : 400,
-              }}
+              style={{ flex: 1, fontSize: "0.8rem" }}
             >
               {m === "signin" ? "Sign in" : "Create account"}
             </button>
@@ -306,49 +302,49 @@ function LoginScreen() {
         </div>
 
         <form onSubmit={submit} style={{ display: "grid", gap: 10 }}>
-          <label style={fieldWrap}>
+          <label className="auth-field" style={fieldWrap}>
             <EnvelopeSimple size={15} color="var(--text-low)" />
             <input
+              className="auth-input"
               type="email"
               required
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={inputStyle}
               autoComplete="email"
             />
           </label>
-          <label style={fieldWrap}>
+          <label className="auth-field" style={fieldWrap}>
             <LockKey size={15} color="var(--text-low)" />
             <input
+              className="auth-input"
               type="password"
               required
               minLength={6}
               placeholder="Password (min 6 chars)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              style={inputStyle}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
             />
           </label>
 
           {error && (
-            <p style={{ color: "#c0392b", fontSize: 12.5, margin: 0 }}>{error}</p>
+            <p role="alert" style={{ color: "var(--danger)", fontSize: 12.5, margin: 0 }}>
+              {error}
+            </p>
           )}
           {notice && (
-            <p style={{ color: "var(--signal)", fontSize: 12.5, margin: 0 }}>{notice}</p>
+            <p style={{ color: "var(--ok)", fontSize: 12.5, margin: 0 }}>{notice}</p>
           )}
 
           <button
             type="submit"
             disabled={busy}
+            className="btn-primary"
             style={{
               marginTop: 4,
-              padding: "11px 0",
-              border: "none",
-              borderRadius: 9,
-              background: "var(--signal)",
-              color: "var(--signal-ink)",
+              width: "100%",
+              borderRadius: "var(--r-md)",
               fontWeight: 600,
               fontSize: 14,
               cursor: busy ? "wait" : "pointer",
@@ -361,37 +357,36 @@ function LoginScreen() {
 
         {mode === "signin" && (
           <button
+            type="button"
             onClick={() => void forgot()}
             disabled={busy}
             style={{
-              marginTop: 8,
+              marginTop: 10,
               border: "none",
               background: "transparent",
               color: "var(--signal)",
-              fontSize: 12,
+              fontSize: 12.5,
               cursor: "pointer",
               padding: 0,
-              alignSelf: "flex-start",
             }}
           >
             Forgot password?
           </button>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "18px 0 14px" }}>
           <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
-          <span style={{ fontSize: 11, color: "var(--text-low)", letterSpacing: "0.1em" }}>
-            OR
-          </span>
+          <span className="label-mono">or</span>
           <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
         </div>
 
         <button
+          type="button"
           onClick={continueAsGuest}
           style={{
             width: "100%",
             padding: "10px 0",
-            borderRadius: 9,
+            borderRadius: "var(--r-md)",
             border: "1px dashed var(--line-strong)",
             background: "transparent",
             color: "var(--text-hi)",
@@ -403,17 +398,25 @@ function LoginScreen() {
             gap: 7,
           }}
         >
-          <UserCircle size={16} weight="duotone" />
-          Continue as Guest <span style={{ color: "var(--text-low)" }}>(developer mode)</span>
+          <UserCircle size={16} weight="duotone" color="var(--signal)" />
+          Continue as Guest
+          <span style={{ color: "var(--text-low)" }}>(developer mode)</span>
         </button>
-        <p style={{ fontSize: 11.5, color: "var(--text-low)", margin: "10px 0 0", lineHeight: 1.5 }}>
-          Guests get a private, browser-local ID — orders stay isolated per browser and are
-          not linked to an email. Sign in with any account (or create several) to keep each
+        <p
+          style={{
+            fontSize: 11.5,
+            color: "var(--text-mid)",
+            margin: "12px 0 0",
+            lineHeight: 1.55,
+          }}
+        >
+          Guests get a private, browser-local ID — orders stay isolated per browser and are not
+          linked to an email. Sign in with any account (or create several) to keep each
           account's orders separate; use Sign out in the sidebar to switch.
         </p>
         {!authConfigured() && (
-          <p style={{ fontSize: 11, color: "var(--text-low)", margin: "8px 0 0" }}>
-            Email login is disabled: server env NEXT_PUBLIC_SUPABASE_* not set.
+          <p className="label-mono" style={{ marginTop: 10 }}>
+            Email login disabled — server env NEXT_PUBLIC_SUPABASE_* not set
           </p>
         )}
       </div>
@@ -425,17 +428,8 @@ const fieldWrap: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 9,
-  border: "1px solid var(--line)",
-  borderRadius: 9,
+  border: "1px solid var(--line-strong)",
+  borderRadius: "var(--r-md)",
   padding: "9px 12px",
-  background: "#fbfbfa",
-};
-
-const inputStyle: React.CSSProperties = {
-  border: "none",
-  outline: "none",
-  background: "transparent",
-  flex: 1,
-  fontSize: 13.5,
-  color: "var(--text-hi)",
+  background: "var(--ink-1)",
 };

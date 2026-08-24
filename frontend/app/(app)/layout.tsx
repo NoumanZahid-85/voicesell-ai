@@ -67,7 +67,7 @@ function AccountChip({ compact = false }: { compact?: boolean }) {
           alignItems: "center",
           gap: 6,
           border: "1px solid var(--line)",
-          background: "#fff",
+          background: "var(--ink-2)",
           borderRadius: 7,
           padding: "5px 9px",
           fontSize: 11.5,
