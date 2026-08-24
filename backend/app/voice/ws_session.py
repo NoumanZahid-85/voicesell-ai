@@ -185,10 +185,11 @@ class SileroGate:
 class VoiceWSSession:
     """One browser voice connection: VAD → Whisper → LangGraph → Orpheus."""
 
-    def __init__(self, ws, db, session_id: str) -> None:
+    def __init__(self, ws, db, session_id: str, customer_id: str = "") -> None:
         self.ws = ws
         self.db = db
         self.session_id = session_id
+        self.customer_id = customer_id
         self.groq = AsyncGroq(api_key=get_settings().groq_api_key)
         self.vad = SileroGate()
 
@@ -342,6 +343,7 @@ class VoiceWSSession:
                     {
                         "user_message": user_text,
                         "session_id": self.session_id,
+                        "customer_id": self.customer_id,
                         "history": history,
                         "intent": "",
                         "context": "",

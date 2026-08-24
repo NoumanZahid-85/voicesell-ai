@@ -13,6 +13,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import { useIdentity } from "@/components/auth";
 import type { ChatSource } from "@/lib/types";
 import { PageHeader } from "@/app/components/ui";
 import { formatCurrency, formatTime } from "@/lib/format";
@@ -92,6 +93,8 @@ function resampleTo16k(input: Float32Array, fromRate: number): Float32Array {
 
 export default function ChatPage() {
   const sessionId = useSessionId();
+  const { identity } = useIdentity();
+  const customerId = identity?.customerId ?? "";
   const [mode, setMode] = useState<Mode>("text");
   const [messages, setMessages] = useState<Message[]>(() => {
     if (typeof window !== "undefined") {
@@ -167,7 +170,7 @@ export default function ChatPage() {
     ]);
     setLoading(true);
     try {
-      const data = await api.chat(msg, sessionId);
+      const data = await api.chat(msg, sessionId, customerId);
       setMessages((prev) => [
         ...prev,
         {
@@ -246,7 +249,7 @@ export default function ChatPage() {
     audioCtxRef.current = audioCtx;
 
     const wsSessionId = `${sessionId}-${Date.now().toString(36)}`;
-    const ws = new WebSocket(api.voice.wsUrl(wsSessionId));
+    const ws = new WebSocket(api.voice.wsUrl(wsSessionId, customerId));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     setVoiceSessionId(wsSessionId);
@@ -383,7 +386,7 @@ export default function ChatPage() {
         ts: new Date(),
       },
     ]);
-  }, [sessionId]);
+  }, [sessionId, customerId]);
 
   const stopVoice = useCallback(async () => {
     try {

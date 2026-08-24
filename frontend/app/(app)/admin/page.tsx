@@ -14,7 +14,8 @@ import {
   MicrophoneStage,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { api, DEMO_CUSTOMER_ID } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useIdentity } from "@/components/auth";
 import type { AdminStats, HealthData, Order, Product, VoiceSession } from "@/lib/types";
 import { PageHeader } from "@/app/components/ui";
 import { formatCurrency } from "@/lib/format";
@@ -60,6 +61,8 @@ function CountUp({ value, numeric }: { value: string; numeric: number }) {
 
 export default function AdminPage() {
   const router = useRouter();
+  const { identity } = useIdentity();
+  const customerId = identity?.customerId ?? "";
   const [health, setHealth] = useState<HealthData | null>(null);
   const [sessions, setSessions] = useState<VoiceSession[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -68,12 +71,13 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (!customerId) return;
     setLoading(true);
     try {
       const [h, s, o, p, st] = await Promise.allSettled([
         api.health(),
         api.voice.sessions(),
-        api.orders(DEMO_CUSTOMER_ID),
+        api.orders(customerId),
         api.products({ limit: 500 }),
         api.adminStats(),
       ]);
@@ -87,7 +91,7 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [customerId]);
 
   useEffect(() => {
     let cancelled = false;

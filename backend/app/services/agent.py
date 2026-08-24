@@ -107,6 +107,7 @@ def classify_intent(text: str) -> str:
 class AgentState(TypedDict):
     user_message: str
     session_id:   str         # voice session / Redis key
+    customer_id:  str         # authenticated Supabase user id or per-browser guest id
     history:      list[dict]
     intent:       str
     context:      str
@@ -183,6 +184,9 @@ def build_agent_graph(session, session_id: str = ""):
         sid = state.get("session_id") or session_id
         msg = state["user_message"].lower().strip()
         state["order_result"] = None
+        # Every order mutation is scoped to the caller's identity: the
+        # Supabase auth user id, or (guest mode) a per-browser random id.
+        cid = state.get("customer_id") or _ANON_CUSTOMER_ID
 
         # ── Step 1: confirmation pending? ────────────────────────────
         if sid:
@@ -211,7 +215,7 @@ def build_agent_graph(session, session_id: str = ""):
                     # order — saying "I've added it" without creating an
                     # order made the whole upsell loop cosmetic.
                     state["order_result"] = await _place_addon_order(
-                        session, sid, str(pending.get("product_name", ""))
+                        session, sid, str(pending.get("product_name", "")), cid
                     )
                     return state
                 if _is_negation(msg):
@@ -233,7 +237,7 @@ def build_agent_graph(session, session_id: str = ""):
             # ── Order confirmation / cancellation ─────────────────────
             if pending and _is_affirmation(msg):
                 try:
-                    state["order_result"] = await _execute_pending(session, sid, pending)
+                    state["order_result"] = await _execute_pending(session, sid, pending, cid)
                 except OrderError as exc:
                     logger.warning(
                         "Order execution failed for session=%s: %s", sid, exc
@@ -260,7 +264,7 @@ def build_agent_graph(session, session_id: str = ""):
                         extracted_upsell = _upsell_product_from_text(last_bot)
                         if extracted_upsell:
                             state["order_result"] = await _place_addon_order(
-                                session, sid, extracted_upsell
+                                session, sid, extracted_upsell, cid
                             )
                             return state
                         state["order_result"] = {"error": "parse_failed"}
@@ -270,7 +274,7 @@ def build_agent_graph(session, session_id: str = ""):
                 if _history_awaits_confirmation(state.get("history") or []):
                     if _is_affirmation(msg):
                         state["order_result"] = await _rebuild_and_execute(
-                            session, sid, state.get("history") or []
+                            session, sid, state.get("history") or [], cid
                         )
                     else:
                         state["order_result"] = {"status": "cancelled_by_user"}
@@ -309,6 +313,7 @@ def build_agent_graph(session, session_id: str = ""):
                         "lines": [{"name": ln.product_name, "qty": ln.quantity} for ln in lines],
                         "idem_key": idem,
                         "total": total,
+                        "customer_id": cid,
                     })
                 state["order_result"] = {
                     "status": "awaiting_confirmation",
@@ -320,7 +325,6 @@ def build_agent_graph(session, session_id: str = ""):
 
         elif action == "cancel":
             order_id = extracted.get("order_id", "")
-            cust_id  = extracted.get("customer_id", "")
             if not order_id:
                 state["order_result"] = {"error": "missing_order_id"}
                 return state
@@ -329,7 +333,7 @@ def build_agent_graph(session, session_id: str = ""):
                 await set_pending_order(sid, {
                     "action": "cancel",
                     "order_id": order_id,
-                    "customer_id": cust_id,
+                    "customer_id": cid,
                 })
             state["order_result"] = {
                 "status": "awaiting_cancel_confirmation",
@@ -337,12 +341,10 @@ def build_agent_graph(session, session_id: str = ""):
             }
 
         elif action == "list":
-            cust_id = extracted.get("customer_id", "")
-            if not cust_id:
-                state["order_result"] = {"error": "missing_customer_id"}
-                return state
+            # Always scope order listings to the caller's own identity —
+            # the LLM-extracted customer_id here was never real input.
             try:
-                orders = await list_customer_orders(session, cust_id, limit=5)
+                orders = await list_customer_orders(session, cid, limit=5)
                 state["order_result"] = {
                     "status": "orders_listed",
                     "orders": [
@@ -473,10 +475,13 @@ def decide_gate_action(pending: dict | None, utterance: str) -> str:
     return "stall"
 
 
-async def _execute_pending(session, sid: str, pending: dict) -> dict:
+async def _execute_pending(session, sid: str, pending: dict, cid: str = "") -> dict:
     """Execute a previously pending order action after voice confirmation."""
     await clear_pending_order(sid)
     action = pending.get("action")
+    # Prefer the identity threaded from the current turn; fall back to the
+    # one stored when the action was staged (older pendings).
+    owner = cid or pending.get("customer_id") or _ANON_CUSTOMER_ID
 
     if action == "create":
         lines = [
@@ -485,7 +490,7 @@ async def _execute_pending(session, sid: str, pending: dict) -> dict:
         ]
         result = await create_order(
             session,
-            customer_id=pending.get("customer_id", _ANON_CUSTOMER_ID),
+            customer_id=owner,
             lines=lines,
             idempotency_key=pending.get("idem_key", ""),
         )
@@ -507,7 +512,7 @@ async def _execute_pending(session, sid: str, pending: dict) -> dict:
         result = await cancel_order(
             session,
             order_id=pending["order_id"],
-            customer_id=pending.get("customer_id", _ANON_CUSTOMER_ID),
+            customer_id=owner,
         )
         return {"status": "order_cancelled", "order_id": result.order_id[:8]}
 
@@ -562,7 +567,7 @@ def _is_pure_gate_utterance(text: str) -> bool:
     return len(t.split()) <= 3 and (_is_affirmation(t) or _is_negation(t))
 
 
-async def _place_addon_order(session, sid: str, product_name: str) -> dict:
+async def _place_addon_order(session, sid: str, product_name: str, cid: str = "") -> dict:
     """Create a 1-unit add-on order for an accepted upsell suggestion."""
     if not product_name:
         return {"error": "parse_failed"}
@@ -570,7 +575,7 @@ async def _place_addon_order(session, sid: str, product_name: str) -> dict:
     try:
         result = await create_order(
             session,
-            customer_id=_ANON_CUSTOMER_ID,
+            customer_id=cid or _ANON_CUSTOMER_ID,
             lines=lines,
             idempotency_key=build_idempotency_key(f"{sid}:upsell", lines),
         )
@@ -591,7 +596,7 @@ async def _place_addon_order(session, sid: str, product_name: str) -> dict:
         }
 
 
-async def _rebuild_and_execute(session, sid: str, history: list[dict]) -> dict:
+async def _rebuild_and_execute(session, sid: str, history: list[dict], cid: str = "") -> dict:
     """
     Re-derive and execute the action the customer already quoted-approved.
 
@@ -624,7 +629,7 @@ async def _rebuild_and_execute(session, sid: str, history: list[dict]) -> dict:
             try:
                 result = await create_order(
                     session,
-                    customer_id=_ANON_CUSTOMER_ID,
+                    customer_id=cid or _ANON_CUSTOMER_ID,
                     lines=lines,
                     idempotency_key=build_idempotency_key(sid or "anon", lines),
                 )
@@ -659,7 +664,7 @@ async def _rebuild_and_execute(session, sid: str, history: list[dict]) -> dict:
                 continue
             try:
                 result = await cancel_order(
-                    session, order_id=oid, customer_id=_ANON_CUSTOMER_ID
+                    session, order_id=oid, customer_id=cid or _ANON_CUSTOMER_ID
                 )
                 return {"status": "order_cancelled", "order_id": result.order_id[:8]}
             except OrderError as exc:

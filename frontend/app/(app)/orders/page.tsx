@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -10,7 +10,8 @@ import {
   ShoppingCartSimple,
   XCircle,
 } from "@phosphor-icons/react";
-import { api, DEMO_CUSTOMER_ID } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useIdentity } from "@/components/auth";
 import type { Order, OrderStatus } from "@/lib/types";
 import {
   STATUS_META,
@@ -158,19 +159,22 @@ export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<OrderStatus | "all">("all");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const { identity } = useIdentity();
+  const customerId = identity?.customerId ?? "";
 
   const fetchOrders = useCallback(async () => {
+    if (!customerId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.orders(DEMO_CUSTOMER_ID);
+      const data = await api.orders(customerId);
       setOrders(data.orders);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [customerId]);
 
   const cancelOrder = useCallback(async (order: Order) => {
     if (
@@ -182,7 +186,7 @@ export default function OrdersPage() {
     }
     setCancellingId(order.id);
     try {
-      await api.cancelOrder(order.id, DEMO_CUSTOMER_ID);
+      await api.cancelOrder(order.id, customerId);
       await fetchOrders();
     } catch (err: unknown) {
       window.alert(err instanceof Error ? err.message : String(err));
@@ -219,7 +223,7 @@ export default function OrdersPage() {
       <PageHeader
         icon={<ShoppingCartSimple size={17} weight="duotone" />}
         title="Order History"
-        subtitle={`CUSTOMER ${DEMO_CUSTOMER_ID.slice(0, 8).toUpperCase()} · ${orders.length} ORDERS · ${formatCurrency(totalValue)} TOTAL`}
+        subtitle={`${identity?.mode === "user" ? "ACCOUNT" : "GUEST"} ${customerId.slice(0, 8).toUpperCase()} · ${orders.length} ORDERS · ${formatCurrency(totalValue)} TOTAL`}
         actions={
           <button className="btn-ghost btn-sm" onClick={fetchOrders}>
             <ArrowClockwise size={13} /> Refresh

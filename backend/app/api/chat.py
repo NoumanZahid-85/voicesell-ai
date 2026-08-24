@@ -114,6 +114,7 @@ async def chat(
             {
                 "user_message":   req.message,
                 "session_id":     req.session_id,
+                "customer_id":    req.customer_id or "",
                 "history":        history,
                 "intent":         "",
                 "context":        "",

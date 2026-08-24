@@ -95,3 +95,10 @@ services:
       # Must match the backend service's actual onrender.com URL exactly.
       - key: NEXT_PUBLIC_BACKEND_URL
         value: https://voicesell-backend.onrender.com
+      # Supabase email/password login. Fill these in the Render dashboard
+      # (Settings > API in Supabase -> Project URL + anon public key).
+      # Left empty, the app runs in guest-only mode with no login screen.
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false

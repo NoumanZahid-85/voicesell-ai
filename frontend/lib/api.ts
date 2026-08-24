@@ -100,11 +100,11 @@ async function send(path: string, init?: RequestInit): Promise<void> {
 export const api = {
   health: () => fetchJSON<HealthData>("/health", undefined, 15_000, true), // retry once — cold-start can take ~14s
 
-  chat: (message: string, sessionId: string) =>
+  chat: (message: string, sessionId: string, customerId?: string) =>
     fetchJSON<ChatResponse>("/api/v1/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, session_id: sessionId }),
+      body: JSON.stringify({ message, session_id: sessionId, customer_id: customerId ?? "" }),
     }),
 
   orders: (customerId: string, limit = 50) =>
@@ -130,11 +130,15 @@ export const api = {
     disconnect: (sessionId: string) =>
       send(`/api/v1/voice/connect/${sessionId}`, { method: "DELETE" }),
     sessions: () => fetchJSON<VoiceSession[]>("/api/v1/voice/sessions"),
-    wsUrl: (sessionId: string) => {
+    wsUrl: (sessionId: string, customerId?: string) => {
       const wsBase = BACKEND.replace(/^http/, "ws");
-      return `${wsBase}/api/v1/voice/ws?session_id=${encodeURIComponent(sessionId)}`;
+      const params = new URLSearchParams({ session_id: sessionId });
+      if (customerId) params.set("customer_id", customerId);
+      return `${wsBase}/api/v1/voice/ws?${params}`;
     },
   },
 };
 
+/** Legacy shared demo customer — kept only as a backend default for
+ *  requests that omit customer_id. The UI never sends it anymore. */
 export const DEMO_CUSTOMER_ID = "00000000-0000-0000-0000-000000000001";
