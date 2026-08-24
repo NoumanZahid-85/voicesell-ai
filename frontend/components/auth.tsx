@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { EnvelopeSimple, LockKey, UserCircle, Waveform } from "@phosphor-icons/react";
 import {
   authConfigured,
@@ -192,15 +193,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const { identity, ready } = useIdentity();
-  if (!ready || !identity) return <LoginScreen />;
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Protected routes never render an inline login card — they bounce to
+  // the dedicated /login page (preserving the destination for after auth).
+  useEffect(() => {
+    if (ready && !identity) {
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [ready, identity, router, pathname]);
+
+  if (!ready || !identity) return null;
   return <>{children}</>;
 }
 
-/* ── Login / signup screen ──────────────────────────────────────────── */
+/* ── Login / signup screen (rendered on the dedicated /login page) ──── */
 
-function LoginScreen() {
+export function LoginScreen({
+  initialMode = "signin",
+}: { initialMode?: "signin" | "signup" } = {}) {
   const { signIn, signUp, resetPassword, continueAsGuest } = useIdentity();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -275,7 +289,7 @@ function LoginScreen() {
               color: "var(--text-hi)",
             }}
           >
-            CALLIOPE
+            OMNIVOICE
           </strong>
         </div>
         <p style={{ color: "var(--text-mid)", fontSize: 13.5, marginBottom: 18, lineHeight: 1.5 }}>

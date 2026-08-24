@@ -1,4 +1,4 @@
-# Calliope AI (VoiceSell)
+﻿# OmniVoice AI (VoiceSell)
 
 **Production-grade, voice-enabled commerce agent** — a pure WebSocket voice pipeline (browser microphone → server-side VAD → Groq Whisper → LangGraph agent → streamed TTS back to the browser), RAG-grounded product recommendations, per-user order isolation with Supabase auth, and an automated end-to-end voice tester that places real orders before you ever open your mic.
 

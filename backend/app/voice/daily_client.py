@@ -1,4 +1,4 @@
-"""
+﻿"""
 Daily.co room factory — creates ephemeral WebRTC rooms and meeting tokens.
 
 Design decisions:
@@ -128,7 +128,7 @@ async def create_bot_token(api_key: str, room_name: str) -> DailyToken:
             "properties": {
                 "room_name": room_name,
                 "is_owner": True,
-                "user_name": "CALLIOPE-Bot",
+                "user_name": "OMNIVOICE-Bot",
                 "enable_screenshare": False,
                 "start_video_off": True,
             }

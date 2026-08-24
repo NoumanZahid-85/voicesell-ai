@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for the /health endpoint and data model sanity.
 """
 
@@ -63,7 +63,7 @@ def test_settings_loads():
     # Since DATABASE_URL is required, this tests that .env is present
     try:
         s = Settings()  # type: ignore[call-arg]
-        assert s.app_name == "CALLIOPE"
+        assert s.app_name == "OMNIVOICE"
     except Exception:
         # Expected if DATABASE_URL is not set in test env
         pass

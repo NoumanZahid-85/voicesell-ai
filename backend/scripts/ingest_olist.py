@@ -1,4 +1,4 @@
-"""
+﻿"""
 Olist product catalog ingestion script.
 
 Downloads the Olist Brazilian E-Commerce dataset, translates Portuguese
@@ -393,7 +393,7 @@ async def ingest(session: AsyncSession, products_data: list[dict]) -> tuple[int,
 async def main():
     """Main entry point for the ingestion script."""
     logger.info("═" * 60)
-    logger.info("CALLIOPE — Olist Data Ingestion")
+    logger.info("OMNIVOICE — Olist Data Ingestion")
     logger.info("═" * 60)
 
     # Ensure .env is loaded

@@ -162,6 +162,20 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     product = relationship("Product", back_populates="order_items")
 
+    @property
+    def product_name(self) -> str:
+        """Human display name for API responses.
+
+        Strips the seeded "#NN" stock-keeping suffix ("Bluetooth Speaker
+        #07" -> "Bluetooth Speaker") so orders never show jargon codes.
+        Falls back to the raw name, then the product id.
+        """
+        import re
+
+        if self.product and self.product.name:
+            return re.sub(r"\s*#\d+\s*$", "", self.product.name).strip() or self.product.name
+        return str(self.product_id)
+
 
 class ProductAssociation(Base):
     """Frequently-bought-together rules mined from order history (Phase 5)."""

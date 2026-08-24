@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { MotionProvider } from "./components/motion-provider";
+import { AuthProvider } from "@/components/auth";
 import "./globals.css";
 
 const inter = Inter({
@@ -16,11 +17,11 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CALLIOPE — Voice-Powered Sales Assistant",
+  title: "OMNIVOICE — Voice-Powered Sales Assistant",
   description:
     "Talk to an AI sales agent by voice or text. Get instant product answers, place orders, and get personalised recommendations — all in under 500ms.",
   openGraph: {
-    title: "CALLIOPE",
+    title: "OMNIVOICE",
     description: "Voice-powered e-commerce AI agent with RAG-grounded answers",
     type: "website",
   },
@@ -36,7 +37,9 @@ export default function RootLayout({
         className={`${inter.variable} ${jetbrains.variable}`}
       >
         <div className="stage" aria-hidden="true" />
-        <MotionProvider>{children}</MotionProvider>
+        <MotionProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </MotionProvider>
       </body>
     </html>
   );

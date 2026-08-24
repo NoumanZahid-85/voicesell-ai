@@ -1,4 +1,4 @@
-"""
+﻿"""
 Centralized settings using pydantic-settings for environment variable management.
 Validates env vars at startup — catches missing keys before runtime.
 """
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     rag_vector_score_threshold: float = 0.45  # below this → keyword fallback
 
     # ── Application ────────────────────────────────────────────────
-    app_name: str = "CALLIOPE"
+    app_name: str = "OMNIVOICE"
     debug: bool = False
     log_level: str = "INFO"
 

@@ -78,7 +78,7 @@ async def recv_until_quiet(ws, quiet_s: float = 10.0, max_wait: float = 120.0):
         t = d.get("type")
         if t == "agent_caption":
             captions.append(d["text"])
-            print(f"   CALLIOPE: {d['text']}")
+            print(f"   OMNIVOICE: {d['text']}")
         elif t == "transcript":
             transcripts.append(d["text"])
             print(f"   TRANSCRIPT: {d['text']!r}")

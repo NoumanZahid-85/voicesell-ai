@@ -1,4 +1,4 @@
-"""
+﻿"""
 Pure-WebSocket voice pipeline — replaces the Daily/Pipecat transport stack.
 
 Protocol
@@ -111,7 +111,7 @@ STT_TIMEOUT_S = 12.0
 TTS_TIMEOUT_S = 30.0
 
 _GREETING = (
-    "Hello! I'm CALLIOPE, your shopping assistant. "
+    "Hello! I'm OMNIVOICE, your shopping assistant. "
     "Ask me about our products, prices, or say buy, followed by what you need."
 )
 

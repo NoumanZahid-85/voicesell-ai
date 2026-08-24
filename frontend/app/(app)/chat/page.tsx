@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -114,7 +114,7 @@ export default function ChatPage() {
       {
         id: "welcome",
         role: "agent",
-        text: "Hi! I'm CALLIOPE. Ask me anything about our product catalog, or say 'start voice' to switch to voice mode. I can also help you place and manage orders.",
+        text: "Hi! I'm OMNIVOICE. Ask me anything about our product catalog, or say 'start voice' to switch to voice mode. I can also help you place and manage orders.",
         ts: new Date(),
       },
     ];
@@ -134,7 +134,7 @@ export default function ChatPage() {
   // Audio playback queue: decoded WAV buffers awaiting sequential play.
   const playQueueRef = useRef<AudioBuffer[]>([]);
   const playingRef = useRef(false);
-  // True while CALLIOPE has the floor — mic streaming is suppressed.
+  // True while OMNIVOICE has the floor — mic streaming is suppressed.
   const gateRef = useRef(false);
   // Mirror of voiceState usable inside stable callbacks/event handlers.
   const voiceStateRef = useRef<VoiceState>("idle");
@@ -663,7 +663,7 @@ export default function ChatPage() {
           }}
         >
           <span className="label-mono" style={{ marginRight: 8, fontSize: "0.62rem", opacity: 0.7 }}>
-            {caption.role === "user" ? "YOU" : "CALLIOPE"}
+            {caption.role === "user" ? "YOU" : "OMNIVOICE"}
           </span>
           {caption.text}
           <span className="blink" style={{ marginLeft: 2 }}>▍</span>

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Embedding pipeline: products (PostgreSQL) → chunks → Qdrant vectors.
 
 Loads products, chunks long descriptions (50-char overlap), embeds with
@@ -174,7 +174,7 @@ async def embed_products() -> int:
 async def main():
     """Main entry point."""
     logger.info("═" * 60)
-    logger.info("CALLIOPE — Product Embedding Pipeline")
+    logger.info("OMNIVOICE — Product Embedding Pipeline")
     logger.info("═" * 60)
 
     product_count = await embed_products()

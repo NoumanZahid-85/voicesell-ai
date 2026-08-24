@@ -1,5 +1,5 @@
-"""
-CALLIOPE — FastAPI application entrypoint.
+﻿"""
+OMNIVOICE — FastAPI application entrypoint.
 
 Initializes the application and registers all API routers. Startup/shutdown
 wiring lives in app.bootstrap — this file is an assembly list only.

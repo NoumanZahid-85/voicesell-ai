@@ -1,5 +1,5 @@
-"""
-CALLIOPE — Beach & Outdoor category seed.
+﻿"""
+OMNIVOICE — Beach & Outdoor category seed.
 
 Idempotent: creates the category if missing and inserts any product
 that does not already exist (matched by name). Safe to re-run.
@@ -119,7 +119,7 @@ async def seed() -> int:
 async def main():
     """Main entry point."""
     logger.info("═" * 60)
-    logger.info("CALLIOPE — Beach & Outdoor Catalog Seed")
+    logger.info("OMNIVOICE — Beach & Outdoor Catalog Seed")
     logger.info("═" * 60)
     await seed()
     await get_engine().dispose()

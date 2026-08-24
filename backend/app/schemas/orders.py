@@ -23,6 +23,7 @@ class OrderItemCreate(OrderItemBase):
 
 class OrderItemResponse(OrderItemBase):
     id: UUID
+    product_name: str
     unit_price: float
     subtotal: float
 

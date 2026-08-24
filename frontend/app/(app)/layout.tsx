@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -12,7 +12,7 @@ import {
   SignOut,
   UserCircle,
 } from "@phosphor-icons/react";
-import { AuthGate, AuthProvider, useIdentity } from "@/components/auth";
+import { AuthGate, useIdentity } from "@/components/auth";
 
 const NAV = {
   workspace: [
@@ -27,11 +27,9 @@ const NAV = {
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthProvider>
-      <AuthGate>
-        <ConsoleShell>{children}</ConsoleShell>
-      </AuthGate>
-    </AuthProvider>
+    <AuthGate>
+      <ConsoleShell>{children}</ConsoleShell>
+    </AuthGate>
   );
 }
 
@@ -120,7 +118,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-brand">
           <Waveform size={20} color="var(--signal)" weight="fill" />
           <span>
-            CALLIOPE
+            OMNIVOICE
           </span>
         </div>
         <nav className="sidebar-nav">{NavList}</nav>
@@ -139,7 +137,7 @@ function ConsoleShell({ children }: { children: React.ReactNode }) {
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none", color: "inherit" }}>
             <Waveform size={19} color="var(--signal)" weight="fill" />
             <span>
-              CALLIOPE
+              OMNIVOICE
             </span>
           </Link>
         </div>

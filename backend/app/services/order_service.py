@@ -44,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -95,6 +96,16 @@ class OrderNotCancellable(OrderError):
 
 
 # ── Data transfer objects ─────────────────────────────────────────────
+
+# Seeded catalog names carry a "#NN" stock-keeping suffix ("Bluetooth
+# Speaker #07"). It's useful for fuzzy matching but reads as jargon in
+# spoken quotes, captions, and order lines — strip it at the boundary.
+_CODE_SUFFIX_RE = re.compile(r"\s*#\d+\s*$")
+
+
+def display_name(name: str) -> str:
+    return _CODE_SUFFIX_RE.sub("", name or "").strip() or (name or "")
+
 
 @dataclass
 class OrderLineInput:
@@ -189,7 +200,7 @@ async def check_and_quote(
         if product.stock_quantity < line.quantity:
             raise InsufficientStock(product.name, line.quantity, product.stock_quantity)
         quote.append({
-            "product_name": product.name,
+            "product_name": display_name(product.name),
             "product_id": str(product.id),
             "quantity": line.quantity,
             "unit_price": product.price,
@@ -299,7 +310,7 @@ async def create_order(
             items=[
                 OrderItemResult(
                     product_id=str(d["product"].id),
-                    product_name=d["product"].name,
+                    product_name=display_name(d["product"].name),
                     quantity=d["quantity"],
                     unit_price=d["unit_price"],
                     subtotal=d["subtotal"],
@@ -467,7 +478,7 @@ def _to_result(order: Order) -> OrderResult:
         items=[
             OrderItemResult(
                 product_id=str(item.product_id),
-                product_name=item.product.name if item.product else str(item.product_id),
+                product_name=display_name(item.product.name) if item.product else str(item.product_id),
                 quantity=item.quantity,
                 unit_price=item.unit_price,
                 subtotal=item.subtotal,

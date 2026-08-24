@@ -1,5 +1,5 @@
-"""
-CALLIOPE — Products API.
+﻿"""
+OMNIVOICE — Products API.
 
 Read-only catalog listing for the frontend admin console. Full product
 CRUD + admin auth lands in Phase 8; this endpoint just serves the

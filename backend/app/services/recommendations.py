@@ -343,15 +343,21 @@ def build_upsell_message(rec: Recommendation) -> str:
 
     Follows the plan spec:
       "By the way, many customers who ordered X also added a Y — it's $Z.
-       Would you like to add one?"
+       Would you like to add one to your order?"
+
+    product_name goes through order_service.display_name so the seeded
+    "#NN" stock codes never leak into speech or captions.
     """
+    from app.services.order_service import display_name
+
+    clean = display_name(rec.product_name)
     if rec.source == "association":
         return (
             f"By the way, many customers who ordered this also picked up "
-            f"the {rec.product_name} — it's ${rec.price:.2f}. "
+            f"the {clean} — it's ${rec.price:.2f}. "
             "Would you like to add one to your order?"
         )
     return (
-        f"You might also like the {rec.product_name} (${rec.price:.2f}), "
+        f"You might also like the {clean} (${rec.price:.2f}), "
         "which pairs well with what you just ordered. Interested?"
     )

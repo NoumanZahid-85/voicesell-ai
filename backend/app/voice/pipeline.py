@@ -1,4 +1,4 @@
-"""
+﻿"""
 Pipecat voice pipeline factory — Groq for both STT and TTS.
 
 Why Groq (switched from Deepgram):
@@ -247,7 +247,7 @@ class VoiceEventProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 _GREETING = (
-    "Hello! I'm CALLIOPE, your shopping assistant. "
+    "Hello! I'm OMNIVOICE, your shopping assistant. "
     "Ask me anything about our products, prices, or to place an order."
 )
 
@@ -271,7 +271,7 @@ async def build_and_run_pipeline(
     transport = DailyTransport(
         room_url=room_url,
         token=bot_token,
-        bot_name="CALLIOPE",
+        bot_name="OMNIVOICE",
         params=DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,

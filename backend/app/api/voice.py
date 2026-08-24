@@ -1,4 +1,4 @@
-"""
+﻿"""
 Voice session management API endpoints.
 
 Endpoints:
@@ -245,7 +245,7 @@ async def voice_selftest(
                 json={
                     "model": "canopylabs/orpheus-v1-english",
                     "voice": "autumn",
-                    "input": "Hello, this is CALLIOPE. Can you hear me clearly?",
+                    "input": "Hello, this is OMNIVOICE. Can you hear me clearly?",
                     "response_format": "wav",
                 },
             )

@@ -1,5 +1,5 @@
-"""
-CALLIOPE — Categories API.
+﻿"""
+OMNIVOICE — Categories API.
 
 Serves the category index with live product counts so the catalog
 browser can render a "radio tuner" rail of departments. Read-only,

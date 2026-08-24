@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { motion } from "motion/react";
@@ -100,7 +100,7 @@ export default function LandingPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <Waveform size={22} color="var(--signal)" weight="fill" />
           <span style={{ fontWeight: 750, fontSize: "1rem", letterSpacing: "-0.01em" }}>
-            CALLIOPE
+            OMNIVOICE
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -159,7 +159,7 @@ export default function LandingPage() {
                   marginBottom: 34,
                 }}
               >
-                CALLIOPE answers product questions, takes orders, and suggests upsells
+                OMNIVOICE answers product questions, takes orders, and suggests upsells
                 over a live voice call — grounded in your catalog, with answers starting
                 in under 500ms.
               </motion.p>
@@ -440,7 +440,7 @@ export default function LandingPage() {
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Waveform size={16} color="var(--signal)" weight="fill" />
-          <span style={{ fontSize: "0.85rem", fontWeight: 650 }}>CALLIOPE</span>
+          <span style={{ fontSize: "0.85rem", fontWeight: 650 }}>OMNIVOICE</span>
         </span>
         <span className="mono-id" style={{ fontSize: "0.66rem" }}>
           Made by <span className="emphasis">Nouman</span>
