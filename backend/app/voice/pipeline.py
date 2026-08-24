@@ -63,6 +63,7 @@ try:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.services.groq.stt import GroqSTTService
     from pipecat.services.groq.tts import GroqTTSService
+    from pipecat.services.tts_service import TextAggregationMode
     from pipecat.transports.daily.transport import (
         DailyOutputTransportMessageFrame,
         DailyParams,
@@ -91,6 +92,7 @@ except ImportError as e:
         DOWNSTREAM = 1
     class GroqSTTService: pass
     class GroqTTSService: pass
+    class TextAggregationMode: pass
     class DailyOutputTransportMessageFrame: pass
     class DailyParams: pass
     class DailyTransport: pass
@@ -287,10 +289,14 @@ async def build_and_run_pipeline(
     vad = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
-                confidence=0.55,
+                # 0.7 confidence + 0.015 volume floor: the earlier 0.55/0.005
+                # tuning fired VAD on room tone (events showed triggers at
+                # rms=0.0014), wasting Groq STT calls and risking playback
+                # cancellation.
+                confidence=0.7,
                 start_secs=0.2,
-                stop_secs=0.4,
-                min_volume=0.005,
+                stop_secs=0.5,
+                min_volume=0.015,
             )
         )
     )
@@ -316,8 +322,15 @@ async def build_and_run_pipeline(
     # matched by audio_out_sample_rate=24000 in PipelineParams below.
     # RobustGroqTTSService replaces pipecat's chunk-by-chunk WAV parsing,
     # which crashed on multi-chunk responses and muted the bot entirely.
+    #
+    # TOKEN aggregation: our agent bridge pushes complete sentences as
+    # individual TextFrames, so each sentence is synthesized immediately —
+    # first audio in ~2-3s. The default SENTENCE mode batches consecutive
+    # frames and produced a single 33-second synthesis (1.6 MB WAV) that
+    # took ~15s to generate before a single word was audible.
     tts = RobustGroqTTSService(
         api_key=settings.groq_api_key,
+        text_aggregation_mode=TextAggregationMode.TOKEN,
         settings=RobustGroqTTSService.Settings(
             model=_GROQ_TTS_MODEL,
             voice=_GROQ_TTS_VOICE,
@@ -343,7 +356,11 @@ async def build_and_run_pipeline(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,          # barge-in enabled
+            # Interruptions OFF: with speakers (no headphones), the bot hears
+            # its own voice via mic leakage and false VAD triggers cancelled
+            # in-flight speech — the "half greeting / replies never play"
+            # symptom. Reliability of complete answers beats barge-in here.
+            allow_interruptions=False,
             enable_metrics=True,
             enable_usage_metrics=True,
             # Orpheus emits 24 kHz WAVs (verified from live tts_audio events:
@@ -358,7 +375,7 @@ async def build_and_run_pipeline(
     # Build fingerprint — appears in /voice/events so we always know WHICH
     # build served a session ("started" alone doesn't tell us).
     from app.voice import session_registry as _reg0
-    _reg0.record_event(session_id, "pipeline_ready", "v3-pipeline-vadproc")
+    _reg0.record_event(session_id, "pipeline_ready", "v4-token-tts-no-interrupt")
 
     # ── Event: first participant joins ────────────────────────────────
     @transport.event_handler("on_first_participant_joined")
