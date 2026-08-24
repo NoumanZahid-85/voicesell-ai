@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import type { ChatSource } from "@/lib/types";
+import type { DailyEventObjectTrack } from "@daily-co/daily-js";
 import { PageHeader } from "@/app/components/ui";
 import { formatCurrency, formatTime } from "@/lib/format";
 
@@ -55,6 +56,26 @@ const VOICE_LABEL: Record<VoiceState, string> = {
   error: "Voice pipeline unavailable",
 };
 
+function mountRemoteAudioEl(): HTMLAudioElement {
+  const el = document.createElement("audio");
+  el.autoplay = true;
+  el.setAttribute("playsinline", "true");
+  el.style.display = "none";
+  document.body.appendChild(el);
+  return el;
+}
+
+function releaseRemoteAudioEl(el: HTMLAudioElement | null) {
+  if (!el) return;
+  try {
+    el.pause();
+    el.srcObject = null;
+    el.remove();
+  } catch {
+    /* best-effort */
+  }
+}
+
 export default function ChatPage() {
   const sessionId = useSessionId();
   const [mode, setMode] = useState<Mode>("text");
@@ -93,6 +114,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const callRef = useRef<any>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -202,6 +224,28 @@ export default function ChatPage() {
       });
       callRef.current = call;
 
+      // A headless call object receives the bot's voice as raw WebRTC tracks
+      // but NEVER plays them — there is no prebuilt UI to do it for us. Route
+      // every remote audio track into one hidden <audio> element. Chrome
+      // permits unmuted autoplay because mic permission was just granted.
+      audioElRef.current = mountRemoteAudioEl();
+      const audioEl = audioElRef.current;
+
+      const attachRemoteAudio = (track?: MediaStreamTrack | null) => {
+        if (!track || track.kind !== "audio") return;
+        const stream = (audioEl.srcObject as MediaStream | null) ?? new MediaStream();
+        if (!stream.getTracks().some((t) => t.id === track.id)) {
+          stream.addTrack(track);
+          audioEl.srcObject = stream;
+        }
+        audioEl.play().catch(() => {});
+      };
+
+      call.on("track-started", (ev: DailyEventObjectTrack) => {
+        if (ev.participant?.local) return;
+        attachRemoteAudio(ev.track);
+      });
+
       call.on("app-message", (ev: { data?: Caption }) => {
         if (ev?.data?.role && typeof ev.data.text === "string") {
           if (ev.data.role === "user") {
@@ -234,6 +278,26 @@ export default function ChatPage() {
       );
       await Promise.race([call.join({ url: data.room_url }), joinTimeout]);
 
+      // Belt-and-braces: attach any remote audio tracks that became playable
+      // before our track-started listener was registered or between events.
+      const parts = call.participants() as Record<
+        string,
+        {
+          local?: boolean;
+          tracks?: {
+            audio?: {
+              track?: MediaStreamTrack | null;
+              persistentTrack?: MediaStreamTrack | null;
+            };
+          };
+        }
+      >;
+      for (const p of Object.values(parts)) {
+        if (p?.local) continue;
+        const t = p?.tracks?.audio?.track ?? p?.tracks?.audio?.persistentTrack ?? null;
+        if (t) attachRemoteAudio(t);
+      }
+
       setVoiceState("listening");
       setMessages((prev) => [
         ...prev,
@@ -255,6 +319,8 @@ export default function ChatPage() {
         }
         callRef.current = null;
       }
+      releaseRemoteAudioEl(audioElRef.current);
+      audioElRef.current = null;
     }
   }, []);
 
@@ -268,6 +334,8 @@ export default function ChatPage() {
       }
       callRef.current = null;
     }
+    releaseRemoteAudioEl(audioElRef.current);
+    audioElRef.current = null;
     if (voiceSessionId) {
       try {
         await api.voice.disconnect(voiceSessionId);
@@ -286,6 +354,8 @@ export default function ChatPage() {
   useEffect(() => {
     return () => {
       callRef.current?.destroy?.();
+      releaseRemoteAudioEl(audioElRef.current);
+      audioElRef.current = null;
     };
   }, []);
 
