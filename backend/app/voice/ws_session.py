@@ -73,7 +73,10 @@ PREROLL_WINDOWS = 18             # ~575 ms of audio kept before speech onset
 
 # ── Model constants (Groq-only stack) ────────────────────────────────
 STT_MODEL = "whisper-large-v3-turbo"
-LLM_TIMEOUT_S = 15.0
+# Order-intent turns run TWO chained LLM calls (item extraction + response);
+# measured ~18s on Render free tier. Budget generously — the fallback phrase
+# firing mid-order is worse than waiting.
+LLM_TIMEOUT_S = 60.0
 TTS_MODEL = "canopylabs/orpheus-v1-english"
 TTS_VOICE = "autumn"
 TTS_CHAR_LIMIT = 180             # hard API limit is 200; stay safely under
