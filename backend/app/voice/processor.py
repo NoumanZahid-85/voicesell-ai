@@ -30,6 +30,8 @@ import time
 
 try:
     from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
         EndFrame,
         Frame,
         LLMMessagesUpdateFrame,
@@ -46,6 +48,8 @@ except ImportError:
     class TranscriptionFrame: pass
     class LLMMessagesUpdateFrame: pass
     class TextFrame: pass
+    class BotStartedSpeakingFrame: pass
+    class BotStoppedSpeakingFrame: pass
     class DailyOutputTransportMessageFrame: pass
     class FrameDirection:
         DOWNSTREAM = 1
@@ -84,6 +88,11 @@ class LangGraphProcessor(FrameProcessor):
         super().__init__()
         self.db_session = db_session
         self.session_id = session_id
+        # Echo guard: while the bot's own voice is playing, the user's mic
+        # (speaker leakage) re-captures it, VAD+STT transcribe it, and the
+        # agent ends up answering itself with generic prompts. Transcripts
+        # that arrive during bot speech are therefore discarded.
+        self._bot_speaking = False
         # Build the LangGraph compiled graph once per voice session
         self._agent = build_agent_graph(db_session, session_id=session_id)
 
@@ -91,19 +100,26 @@ class LangGraphProcessor(FrameProcessor):
         """Route frames through the pipeline, intercepting transcripts."""
         await super().process_frame(frame, direction)
 
-        # We only act on final transcription frames (end-of-turn).
-        # UserStoppedSpeakingFrame comes before TranscriptionFrame; we let
-        # it pass through so Pipecat can manage barge-in state cleanly.
-        if isinstance(frame, TranscriptionFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+        elif isinstance(frame, TranscriptionFrame):
+            if self._bot_speaking:
+                logger.info(
+                    "Echo guard: dropped transcript during bot speech | session=%s",
+                    self.session_id,
+                )
+                return
             transcript = frame.text.strip()
             if not transcript:
                 # Empty frame (noise) — do not invoke the agent
                 return
             await self._send_caption("user", transcript)
             await self._handle_transcript(transcript)
-        else:
-            # Pass every other frame downstream unchanged
-            await self.push_frame(frame, direction)
+
+        # Pass every other frame (and Bot* frames themselves) through
+        await self.push_frame(frame, direction)
 
     async def _handle_transcript(self, text: str) -> None:
         """

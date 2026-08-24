@@ -168,12 +168,15 @@ class RobustGroqTTSService(GroqTTSService):
                 )
             # Yield ~100ms slices instead of one multi-hundred-KB blob —
             # Daily's audio source drops the tail of oversized single writes,
-            # which truncated every second TTS sentence.
+            # which truncated every second TTS sentence. Pace delivery at 75%
+            # of realtime: dumping all chunks instantly overflows Daily's
+            # buffer and drops audio mid-sentence ("missing frames").
             chunk_bytes = max(1, int(rate * 0.1)) * channels * 2
             for i in range(0, len(pcm), chunk_bytes):
                 yield TTSAudioRawFrame(
                     pcm[i : i + chunk_bytes], rate, channels, context_id=context_id
                 )
+                await asyncio.sleep(0.075)
         except Exception as exc:  # noqa: BLE001
             if sid:
                 session_registry.record_event(sid, "tts_error", str(exc)[:140])
@@ -295,7 +298,10 @@ async def build_and_run_pipeline(
                 # cancellation.
                 confidence=0.7,
                 start_secs=0.2,
-                stop_secs=0.5,
+                # 0.8s of silence ends a turn — 0.5s chopped utterances at
+                # natural mid-sentence pauses, so the agent only ever saw
+                # sentence fragments.
+                stop_secs=0.8,
                 min_volume=0.015,
             )
         )
@@ -375,7 +381,7 @@ async def build_and_run_pipeline(
     # Build fingerprint — appears in /voice/events so we always know WHICH
     # build served a session ("started" alone doesn't tell us).
     from app.voice import session_registry as _reg0
-    _reg0.record_event(session_id, "pipeline_ready", "v4-token-tts-no-interrupt")
+    _reg0.record_event(session_id, "pipeline_ready", "v5-echo-guard-paced-tts")
 
     # ── Event: first participant joins ────────────────────────────────
     @transport.event_handler("on_first_participant_joined")
