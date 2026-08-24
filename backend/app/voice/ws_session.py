@@ -38,7 +38,7 @@ import logging
 import re
 import time
 import wave
-from collections import deque
+from collections import OrderedDict, deque
 
 import numpy as np
 from groq import AsyncGroq
@@ -53,6 +53,32 @@ from app.services.agent import (
 from app.voice import session_registry
 
 logger = logging.getLogger(__name__)
+
+# ── TTS audio cache ─────────────────────────────────────────────────
+# The free-tier Orpheus quota is tiny and bursts (greeting + reply chunks +
+# concurrent sessions) trip it. Synthesized WAVs are deterministic per
+# (model, voice, text), so caching them makes the greeting and any repeated
+# phrase free after the first synthesis — the single biggest quota saver.
+_TTS_CACHE_MAX = 128
+_tts_cache: "OrderedDict[str, bytes]" = OrderedDict()
+
+
+def _tts_cache_key(text: str) -> str:
+    return f"{TTS_MODEL}|{TTS_VOICE}|{text}"
+
+
+def _tts_cache_get(key: str) -> bytes | None:
+    wav = _tts_cache.get(key)
+    if wav is not None:
+        _tts_cache.move_to_end(key)
+    return wav
+
+
+def _tts_cache_put(key: str, wav: bytes) -> None:
+    _tts_cache[key] = wav
+    _tts_cache.move_to_end(key)
+    while len(_tts_cache) > _TTS_CACHE_MAX:
+        _tts_cache.popitem(last=False)
 
 try:  # confirmation gate lives next to the agent; keep import tolerant
     from app.services.agent import is_confirmation_utterance
@@ -404,6 +430,12 @@ class VoiceWSSession:
         ]
 
         async def synth(i: int, chunk: str) -> None:
+            key = _tts_cache_key(chunk)
+            cached = _tts_cache_get(key)
+            if cached is not None:
+                slots[i].set_result(cached)
+                session_registry.record_event(self.session_id, "tts_chunk", f"{i}:cached")
+                return
             async with sem:
                 # 429 backoff: the free-tier Orpheus quota is tiny and bursts
                 # (greeting + reply chunks + concurrent sessions) trip it.
@@ -427,7 +459,9 @@ class VoiceWSSession:
                         # AsyncBinaryAPIResponse exposes read() (verified against
                         # groq 1.6.0 source AND a live round-trip call) — not
                         # .content / .aread().
-                        slots[i].set_result(await resp.read())
+                        wav = await resp.read()
+                        _tts_cache_put(key, wav)
+                        slots[i].set_result(wav)
                         session_registry.record_event(self.session_id, "tts_chunk", f"{i}:{len(chunk)}c")
                         break
                     except Exception as exc:  # noqa: BLE001
