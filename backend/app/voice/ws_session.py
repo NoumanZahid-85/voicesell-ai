@@ -405,25 +405,41 @@ class VoiceWSSession:
 
         async def synth(i: int, chunk: str) -> None:
             async with sem:
-                try:
-                    resp = await asyncio.wait_for(
-                        self.groq.audio.speech.create(
-                            model=TTS_MODEL,
-                            voice=TTS_VOICE,
-                            input=chunk,
-                            response_format="wav",
-                        ),
-                        timeout=TTS_TIMEOUT_S,
-                    )
-                    # AsyncBinaryAPIResponse exposes read() (verified against
-                    # groq 1.6.0 source AND a live round-trip call) — not
-                    # .content / .aread().
-                    slots[i].set_result(await resp.read())
-                    session_registry.record_event(self.session_id, "tts_chunk", f"{i}:{len(chunk)}c")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("TTS chunk %s failed: %s", i, exc)
-                    session_registry.record_event(self.session_id, "tts_fail", f"{i}:{str(exc)[:110]}")
-                    slots[i].set_result(None)
+                # 429 backoff: the free-tier Orpheus quota is tiny and bursts
+                # (greeting + reply chunks + concurrent sessions) trip it.
+                # Two spaced retries usually ride out the per-minute window;
+                # otherwise the slot resolves None and playback degrades to
+                # the spoken error path instead of hanging.
+                delays = (0.0, 3.0, 8.0)
+                for attempt, delay in enumerate(delays):
+                    if delay:
+                        await asyncio.sleep(delay)
+                    try:
+                        resp = await asyncio.wait_for(
+                            self.groq.audio.speech.create(
+                                model=TTS_MODEL,
+                                voice=TTS_VOICE,
+                                input=chunk,
+                                response_format="wav",
+                            ),
+                            timeout=TTS_TIMEOUT_S,
+                        )
+                        # AsyncBinaryAPIResponse exposes read() (verified against
+                        # groq 1.6.0 source AND a live round-trip call) — not
+                        # .content / .aread().
+                        slots[i].set_result(await resp.read())
+                        session_registry.record_event(self.session_id, "tts_chunk", f"{i}:{len(chunk)}c")
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        rate_limited = "429" in str(exc) or "rate limit" in str(exc).lower()
+                        retriable = rate_limited and attempt < len(delays) - 1
+                        logger.error("TTS chunk %s failed (attempt %s): %s", i, attempt + 1, exc)
+                        session_registry.record_event(
+                            self.session_id, "tts_fail", f"{i}:a{attempt}:{str(exc)[:90]}"
+                        )
+                        if not retriable:
+                            slots[i].set_result(None)
+                            break
 
         for i, chunk in enumerate(chunks):
             asyncio.create_task(synth(i, chunk))

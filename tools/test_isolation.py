@@ -6,7 +6,9 @@ import uuid
 
 import httpx
 
-BASE = "http://localhost:8077"
+import os
+
+BASE = os.environ.get("ISO_BASE_URL", "http://localhost:8077")
 A = str(uuid.uuid4())  # guest in browser 1
 B = str(uuid.uuid4())  # guest in incognito window
 SA = f"iso-a-{uuid.uuid4().hex[:8]}"
