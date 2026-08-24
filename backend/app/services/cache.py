@@ -108,7 +108,24 @@ async def get_cached_answer(query: str) -> str | None:
         return str(raw) if raw is not None else None
 
 
+_APOLOGY_RE = re.compile(r"\b(i'm sorry|i don't have|we don't have)\b", re.IGNORECASE)
+
+
+def is_cacheable(answer: str) -> bool:
+    """False for empty-context fallback replies ("I'm sorry, I don't have…").
+
+    Caching those poisons the FAQ entry for the exact phrase — every later
+    user asking the same thing gets the refusal without RAG ever being
+    consulted again (observed in production with "what products do you
+    have"). Genuine negative answers ("We don't carry laptops") do not
+    match this pattern and remain cacheable.
+    """
+    return not bool(_APOLOGY_RE.search(answer or ""))
+
+
 async def set_cached_answer(query: str, answer: str, ttl_seconds: int | None = None) -> None:
+    if not is_cacheable(answer):
+        return
     async with safe_redis() as r:
         if r is None:
             return

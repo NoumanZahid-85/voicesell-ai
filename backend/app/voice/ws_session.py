@@ -40,6 +40,7 @@ import time
 import wave
 from collections import deque
 
+import numpy as np
 from groq import AsyncGroq
 
 from app.core.config import get_settings
@@ -146,7 +147,16 @@ class SileroGate:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
 
         self._analyzer = SileroVADAnalyzer(sample_rate=SAMPLE_RATE)
+        # CRITICAL: VADAnalyzer.__init__ leaves the internal sample rate at 0;
+        # the transport framework normally calls set_sample_rate() during
+        # pipeline wiring. Bare construction means every voice_confidence()
+        # call hits the model with sr=0, raises "Supported sampling rates:
+        # [8000, 16000]", and our caller saw a silent permanent 0.0 — the bot
+        # never heard anything. Verified against pipecat 1.7.0 source + local
+        # repro (speech scored 0.995 after this line, 0.000 without it).
+        self._analyzer.set_sample_rate(SAMPLE_RATE)
         self._buf = bytearray()
+        self._warned = False
 
     def feed(self, pcm16: bytes) -> float | None:
         self._buf += pcm16
@@ -155,8 +165,16 @@ class SileroGate:
             window = bytes(self._buf[:VAD_WINDOW_BYTES])
             del self._buf[:VAD_WINDOW_BYTES]
             try:
-                confidences.append(self._analyzer.voice_confidence(window))
-            except Exception:  # noqa: BLE001 — VAD hiccups must not kill the stream
+                # pipecat 1.7.0's voice_confidence returns a shape-(1,)
+                # ndarray, not a float — coerce or every f-string probe
+                # crashes the receive loop (found via local e2e repro).
+                raw = self._analyzer.voice_confidence(window)
+                arr = np.asarray(raw).reshape(-1)
+                confidences.append(float(arr[0]) if arr.size else 0.0)
+            except Exception as exc:  # noqa: BLE001 — VAD hiccups must not kill the stream
+                if not self._warned:
+                    logger.error("Silero analysis failed: %s", exc)
+                    self._warned = True
                 return None
         return max(confidences) if confidences else None
 
@@ -219,7 +237,11 @@ class VoiceWSSession:
         except json.JSONDecodeError:
             return
         if payload.get("type") == "playback_done":
+            # Clear BOTH gates: _handle_utterance's finally can't clear busy
+            # here because its task finished while audio was still playing
+            # (speaking=True), which latched the mic shut permanently.
             self.speaking = False
+            self.busy = False
             session_registry.record_event(self.session_id, "playback_done")
 
     # ── VAD state machine ─────────────────────────────────────────────
@@ -231,8 +253,13 @@ class VoiceWSSession:
         if confidence is None:
             return
 
+        # Duration must come from the actual payload — client message sizes
+        # vary (~40-120 ms), so counting fixed VAD_WINDOW_S per message made
+        # the 1.5 s end-of-turn timer run ~3x slow and turns never closed.
+        chunk_s = (len(pcm16) // 2) / SAMPLE_RATE
+
         self._probe_bytes += len(pcm16)
-        self._probe_max_conf = max(self._probe_max_conf, confidence)
+        self._probe_max_conf = max(self._probe_max_conf, float(confidence))
         if time.monotonic() - self._probe_t0 >= 2.0:
             session_registry.record_event(
                 self.session_id,
@@ -256,11 +283,11 @@ class VoiceWSSession:
                 session_registry.record_event(self.session_id, "vad_start")
         else:
             self._utterance += pcm16
-            self._captured_s += VAD_WINDOW_S
+            self._captured_s += chunk_s
             if confidence >= END_CONFIDENCE:
                 self._silence_s = 0.0
             else:
-                self._silence_s += VAD_WINDOW_S
+                self._silence_s += chunk_s
 
             if (
                 self._silence_s >= SILENCE_END_S
