@@ -15,7 +15,7 @@ from app.db.session import get_session_factory
 from app.voice.ws_session import VoiceWSSession
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/voice")
 
 
 @router.websocket("/ws")
