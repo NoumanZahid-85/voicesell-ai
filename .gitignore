@@ -49,3 +49,4 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 docs/adr/*.md
+backend/test_out.txt
