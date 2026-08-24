@@ -14,6 +14,7 @@ import {
   authConfigured,
   getOrCreateGuestId,
   getSupabase,
+  GUEST_CHOICE_KEY,
 } from "@/lib/supabase";
 
 /**
@@ -41,6 +42,7 @@ interface AuthCtx {
   ready: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
+  resetPassword: (email: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   continueAsGuest: () => void;
 }
@@ -50,6 +52,7 @@ const Ctx = createContext<AuthCtx>({
   ready: false,
   signIn: async () => null,
   signUp: async () => null,
+  resetPassword: async () => null,
   signOut: async () => {},
   continueAsGuest: () => {},
 });
@@ -86,6 +89,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const u = data.session?.user;
         if (u) {
           setIdentity({ customerId: u.id, mode: "user", label: u.email ?? "Signed in" });
+        } else if (
+          typeof window !== "undefined" &&
+          window.sessionStorage.getItem(GUEST_CHOICE_KEY) === "1"
+        ) {
+          // This tab already chose guest mode — keep it across reloads so
+          // testing doesn't bounce back to the login gate every refresh.
+          const id = getOrCreateGuestId();
+          setIdentity({ customerId: id, mode: "guest", label: `Guest · ${id.slice(0, 8)}` });
         }
         setReady(true);
       })
@@ -115,7 +126,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = useCallback(async (email: string, password: string) => {
     const supabase = getSupabase();
     if (!supabase) return "Auth is not configured on this deployment.";
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        // Where "Confirm your email" links land when confirmation is on.
+        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
     if (error) return error.message;
     // Project setting "Confirm email" may require verification before a
     // session exists — surface that instead of a confusing empty state.
@@ -125,20 +143,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  const signOut = useCallback(async () => {
+  const resetPassword = useCallback(async (email: string) => {
     const supabase = getSupabase();
-    if (supabase) await supabase.auth.signOut();
-    setIdentity(null); // back to the login gate
+    if (!supabase) return "Auth is not configured on this deployment.";
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+    });
+    return error ? error.message : null;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    // Robust by construction: whatever happens below (invalid key, network
+    // failure, no session), the login gate MUST come back. A thrown error
+    // here used to skip setIdentity(null) entirely — the reported
+    // "sign out does nothing" bug.
+    try {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(GUEST_CHOICE_KEY);
+      }
+      await getSupabase()?.auth.signOut();
+    } catch (err) {
+      console.warn("signOut: supabase call failed (clearing local identity anyway)", err);
+    } finally {
+      setIdentity(null);
+    }
   }, []);
 
   const continueAsGuest = useCallback(() => {
     const id = getOrCreateGuestId();
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(GUEST_CHOICE_KEY, "1");
+    }
     setIdentity({ customerId: id, mode: "guest", label: `Guest · ${id.slice(0, 8)}` });
   }, []);
 
   const value = useMemo(
-    () => ({ identity, ready, signIn, signUp, signOut, continueAsGuest }),
-    [identity, ready, signIn, signUp, signOut, continueAsGuest],
+    () => ({ identity, ready, signIn, signUp, resetPassword, signOut, continueAsGuest }),
+    [identity, ready, signIn, signUp, resetPassword, signOut, continueAsGuest],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -158,7 +199,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 /* ── Login / signup screen ──────────────────────────────────────────── */
 
 function LoginScreen() {
-  const { signIn, signUp, continueAsGuest } = useIdentity();
+  const { signIn, signUp, resetPassword, continueAsGuest } = useIdentity();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -179,6 +220,30 @@ function LoginScreen() {
       } else if (err) {
         setError(err);
       }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Unexpected error: ${err.message}`
+          : "Unexpected error — please try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forgot = async () => {
+    if (!email) {
+      setError("Enter your email above first, then click Forgot password.");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setBusy(true);
+    try {
+      const err = await resetPassword(email);
+      setNotice(
+        err ?? "Password reset email sent — check your inbox to set a new password.",
+      );
     } finally {
       setBusy(false);
     }
@@ -294,6 +359,25 @@ function LoginScreen() {
           </button>
         </form>
 
+        {mode === "signin" && (
+          <button
+            onClick={() => void forgot()}
+            disabled={busy}
+            style={{
+              marginTop: 8,
+              border: "none",
+              background: "transparent",
+              color: "var(--signal)",
+              fontSize: 12,
+              cursor: "pointer",
+              padding: 0,
+              alignSelf: "flex-start",
+            }}
+          >
+            Forgot password?
+          </button>
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0 12px" }}>
           <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
           <span style={{ fontSize: 11, color: "var(--text-low)", letterSpacing: "0.1em" }}>
@@ -324,7 +408,8 @@ function LoginScreen() {
         </button>
         <p style={{ fontSize: 11.5, color: "var(--text-low)", margin: "10px 0 0", lineHeight: 1.5 }}>
           Guests get a private, browser-local ID — orders stay isolated per browser and are
-          not linked to an email.
+          not linked to an email. Sign in with any account (or create several) to keep each
+          account's orders separate; use Sign out in the sidebar to switch.
         </p>
         {!authConfigured() && (
           <p style={{ fontSize: 11, color: "var(--text-low)", margin: "8px 0 0" }}>
