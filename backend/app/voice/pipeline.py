@@ -48,8 +48,10 @@ import time
 
 try:
     from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
     from pipecat.frames.frames import (
         ErrorFrame,
+        InputAudioRawFrame,
         TextFrame,
         TranscriptionFrame,
         UserStartedSpeakingFrame,
@@ -72,7 +74,9 @@ except ImportError as e:
     VOICE_IMPORT_ERROR = str(e)
     # Define simple dummy classes so uvicorn compiles
     class SileroVADAnalyzer: pass
+    class VADParams: pass
     class ErrorFrame: pass
+    class InputAudioRawFrame: pass
     class TextFrame: pass
     class TranscriptionFrame: pass
     class UserStartedSpeakingFrame: pass
@@ -158,7 +162,14 @@ class RobustGroqTTSService(GroqTTSService):
                 session_registry.record_event(
                     sid, "tts_audio", f"{len(pcm)}b {rate}Hz/{channels}ch"
                 )
-            yield TTSAudioRawFrame(pcm, rate, channels, context_id=context_id)
+            # Yield ~100ms slices instead of one multi-hundred-KB blob —
+            # Daily's audio source drops the tail of oversized single writes,
+            # which truncated every second TTS sentence.
+            chunk_bytes = max(1, int(rate * 0.1)) * channels * 2
+            for i in range(0, len(pcm), chunk_bytes):
+                yield TTSAudioRawFrame(
+                    pcm[i : i + chunk_bytes], rate, channels, context_id=context_id
+                )
         except Exception as exc:  # noqa: BLE001
             if sid:
                 session_registry.record_event(sid, "tts_error", str(exc)[:140])
@@ -179,13 +190,24 @@ class VoiceEventProbe(FrameProcessor):
     def __init__(self, session_id: str) -> None:
         super().__init__()
         self._sid = session_id
+        self._in_count = 0
 
     async def process_frame(self, frame, direction):  # noqa: ANN001
         await super().process_frame(frame, direction)
         try:
             from app.voice import session_registry
 
-            if isinstance(frame, UserStartedSpeakingFrame):
+            if isinstance(frame, InputAudioRawFrame):
+                self._in_count += 1
+                if self._in_count == 1:
+                    session_registry.record_event(
+                        self._sid, "input_audio", "first frame received"
+                    )
+                elif self._in_count % 250 == 0:
+                    session_registry.record_event(
+                        self._sid, "input_audio", f"{self._in_count} frames"
+                    )
+            elif isinstance(frame, UserStartedSpeakingFrame):
                 session_registry.record_event(self._sid, "vad_user_speaking")
             elif isinstance(frame, TranscriptionFrame):
                 session_registry.record_event(self._sid, "transcript", frame.text[:70])
@@ -231,7 +253,17 @@ async def build_and_run_pipeline(
             camera_out_enabled=False,
             transcription_enabled=False,   # Groq handles STT, not Daily
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),  # offline VAD — segments audio for Groq STT
+            # pipecat 1.7.0 defaults min_volume=0.6 (RMS 0-1 scale) — normal
+            # speech is RMS ~0.05-0.25, so the stock gate vetoes EVERY frame
+            # and the bot never hears anything (zero UserStartedSpeakingFrame).
+            vad_analyzer=SileroVADAnalyzer(
+                params=VADParams(
+                    confidence=0.55,
+                    start_secs=0.2,
+                    stop_secs=0.4,
+                    min_volume=0.005,
+                )
+            ),
             vad_audio_passthrough=True,
         ),
     )
@@ -253,8 +285,8 @@ async def build_and_run_pipeline(
     )
 
     # ── Groq TTS (Orpheus v1 English) ─────────────────────────────────
-    # Orpheus outputs a fixed 48 kHz WAV stream (same as the old PlayAI),
-    # so audio_out_sample_rate=48000 below remains correct.
+    # Orpheus returns 24 kHz mono WAVs (read from the live stream header),
+    # matched by audio_out_sample_rate=24000 in PipelineParams below.
     # RobustGroqTTSService replaces pipecat's chunk-by-chunk WAV parsing,
     # which crashed on multi-chunk responses and muted the bot entirely.
     tts = RobustGroqTTSService(
@@ -286,11 +318,10 @@ async def build_and_run_pipeline(
             allow_interruptions=True,          # barge-in enabled
             enable_metrics=True,
             enable_usage_metrics=True,
-            # Groq TTS (PlayAI / Orpheus) outputs a fixed 48 kHz stream.
-            # Daily's default output is 16 kHz — the mismatch causes the
-            # bot to join the room but produce no audible speech (frames
-            # are resampled to silence or dropped entirely).
-            audio_out_sample_rate=48000,
+            # Orpheus emits 24 kHz WAVs (verified from live tts_audio events:
+            # "24000Hz/1ch"). Match the transport to the source rate so no
+            # runtime resampling is needed at all.
+            audio_out_sample_rate=24000,
             # Silero VAD and Groq Whisper STT both work best at 16 kHz.
             audio_in_sample_rate=16000,
         ),
@@ -307,6 +338,17 @@ async def build_and_run_pipeline(
         logger.info("Participant joined session=%s id=%s", session_id, participant.get("id"))
         from app.voice import session_registry
         session_registry.record_event(session_id, "participant_joined")
+        # Publish-side visibility: if the browser never published mic audio,
+        # the audio track's state here will not be "playable".
+        try:
+            audio_state = str(
+                (participant.get("tracks") or {}).get("audio", {}).get("state", "absent")
+            )
+            session_registry.record_event(
+                session_id, "participant_tracks", f"audio={audio_state}"
+            )
+        except Exception:  # noqa: BLE001 — diagnostics must never break the call
+            pass
         # Caption the greeting so the customer SEES the hello even if the
         # audio output path ever fails — silence should never look like a
         # dead connection.
